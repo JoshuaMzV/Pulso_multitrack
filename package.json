@@ -1,0 +1,29 @@
+{
+  "name": "setlist_multitrack",
+  "version": "1.0.0",
+  "description": "PULSO es una plataforma diseñada para superar a **Playback (MultiTracks.com)** y **Prime (Loop Community)**, ofreciendo rendimiento nativo idéntico en **Android (APK/AAB)** y **iOS (IPA)** con latencia ultra-baja (< 5 ms), importación directa en la app sin portales web, gestión de asientos/roles para bandas e iglesias, pads continuos y transiciones fluidas.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "sync": "cap sync",
+    "sync:copy": "node -e \"const fs=require('fs'); fs.cpSync('ui_prototype', 'www', {recursive:true});\" && cap copy",
+    "test:mobile": "python -m http.server 5000 -d www",
+    "android:build": "cd android && gradlew.bat assembleDebug",
+    "android:open": "cap open android",
+    "ios:open": "cap open ios"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
+    "@capacitor/screen-orientation": "^8.0.1"
+  }
+}

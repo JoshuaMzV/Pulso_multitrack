@@ -1,0 +1,14 @@
+{
+  "appId": "com.pulso.multitrack",
+  "appName": "PULSO Multitrack",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "ScreenOrientation": {
+      "orientation": "landscape"
+    }
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
