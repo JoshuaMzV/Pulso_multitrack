@@ -27,13 +27,16 @@ jobs:
           cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm ci || npm install
+        run: npm ci
 
       - name: Sincronizar Capacitor con Android
-        run: npx cap sync android
+        run: npm run build && npx cap sync android
 
       - name: Dar permisos de ejecucion a Gradle
         run: chmod +x android/gradlew
+
+      - name: Instalar herramientas de compilación nativa
+        run: sdkmanager "platforms;android-36" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Compilar APK Debug
         working-directory: android

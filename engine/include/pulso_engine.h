@@ -55,6 +55,11 @@ typedef struct {
 PULSO_API void* pulso_create_engine(uint32_t sampleRate, uint32_t bufferSize);
 PULSO_API void pulso_destroy_engine(void* engine);
 
+// Carga PCM copiado al motor. Solo se llama con el dispositivo de salida detenido.
+PULSO_API bool pulso_load_stereo(void* engine, const float* left, const float* right, uint32_t frames);
+PULSO_API float pulso_position(void* engine);
+PULSO_API bool pulso_is_playing(void* engine);
+
 // Audio Transport
 PULSO_API void pulso_play(void* engine);
 PULSO_API void pulso_pause(void* engine);

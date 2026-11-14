@@ -1,0 +1,204 @@
+/* Jerarquía compartida: paneles amplios, tarjetas medias, controles precisos.
+   Se carga al final para unificar las vistas sin alterar el motor de audio. */
+:root {
+  --radius-panel: 18px;
+  --radius-card: 12px;
+  --radius-control: 7px;
+  --surface-shadow: 0 3px 12px rgba(0, 0, 0, .16);
+  --surface-edge: rgba(255, 255, 255, .035);
+}
+[data-theme="light"] {
+  --surface-shadow: 0 3px 12px rgba(45, 58, 30, .055);
+  --surface-edge: rgba(255, 255, 255, .65);
+}
+
+/* El contenido se agrupa por tarea, sin dibujar un marco en cada texto. */
+#editionConsole, #editionMixerSection {
+  border-radius: var(--radius-panel) !important;
+  box-shadow: var(--surface-shadow) !important;
+  border-color: var(--line) !important;
+}
+.edition-workspace { gap: 12px !important; }
+.c-head {
+  padding: 12px 16px !important;
+  gap: 10px !important;
+  background: var(--panel2);
+  box-shadow: inset 0 1px var(--surface-edge);
+}
+.c-title {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+.c-title strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px !important;
+  letter-spacing: -.02em;
+}
+.c-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--sans);
+  font-size: 11px !important;
+  letter-spacing: .01em;
+  margin-top: 0;
+  color: var(--mut);
+}
+.mixer-toolbar { padding: 10px 14px !important; }
+.mixer-badge-title { letter-spacing: .06em; }
+.mixer-badge-count { border-radius: 5px; }
+
+#editionSongItemsList { gap: 8px !important; }
+#editionSongItemsList .song-card {
+  border-radius: var(--radius-card) !important;
+  padding: 10px !important;
+  box-shadow: inset 0 1px var(--surface-edge);
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+#editionSongItemsList .song-card.active {
+  box-shadow: inset 3px 0 var(--amber), inset 0 1px var(--surface-edge) !important;
+}
+.sc-transition {
+  display: flex;
+  justify-content: center;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  margin-block: -9px;
+}
+.sc-transition:focus-within { z-index: 3; }
+.sc-transition-trigger {
+  width: 32px;
+  height: 30px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--raise);
+  color: var(--amber);
+  font: 700 19px/1 var(--sans);
+  box-shadow: var(--surface-shadow);
+  cursor: pointer;
+}
+.sc-transition-trigger:hover,
+.sc-transition-trigger[aria-expanded="true"] { border-color: var(--amber); }
+.sc-transition-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  width: min(166px, 100%);
+  padding: 4px;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--surface-shadow);
+}
+.sc-transition ~ .sc-transition:has(+ .song-card:last-child) .sc-transition-options {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.sc-transition-options button {
+  display: block;
+  width: 100%;
+  padding: 7px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: 600 10px var(--sans);
+  cursor: pointer;
+}
+.sc-transition-options button:hover { background: var(--raise); }
+.sc-transition-options button[aria-pressed="true"] {
+  border-color: var(--amber);
+  background: var(--selection-green, var(--raise));
+}
+.sc-transition-options button span {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+}
+.sc-title-text { font-size: 12px !important; line-height: 1.35; }
+.sc-row-meta { font-size: 9px !important; line-height: 1.5; color: var(--mut); }
+.sc-key-pill { min-width: 28px; min-height: 20px; border-radius: 6px; }
+#btnSelectSetlistEdition { border-radius: var(--radius-card); min-height: 38px; }
+#btnSidebarAddSong { border-radius: 9px; }
+
+/* Las pistas aprovechan la altura disponible incluso en ventanas estrechas. */
+@media (min-height: 540px) {
+  #tlTracks { max-height: none !important; }
+  .tl-row { height: 30px !important; }
+  .tl-name { font-size: 8.5px !important; }
+}
+
+#mixer .ch { border-radius: var(--radius-card) !important; }
+#mixer .ch.master { box-shadow: -5px 0 16px rgba(0, 0, 0, .10); }
+.ch-db { font-variant-numeric: tabular-nums; }
+.btn, #btnArranger, #btnSaveArranger, #btnRedundancy {
+  border-radius: var(--radius-control);
+}
+#headerPlayBtn, #headerStopBtn { border-radius: 9px !important; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, [role="button"]:focus-visible, input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+@media (hover: hover) {
+  #editionSongItemsList .song-card:not(.active):hover {
+    border-color: var(--amber) !important;
+    box-shadow: var(--surface-shadow);
+  }
+  .btn-ghost:hover, #btnArranger:hover, #btnRedundancy:hover {
+    background: var(--raise-hover);
+    border-color: var(--amber);
+  }
+}
+
+/* Show: escenario legible y controles en posiciones estables. */
+.mo-hero-card { border-radius: 20px; box-shadow: var(--surface-shadow); }
+.mo-next-card { border-radius: 14px; box-shadow: var(--surface-shadow); }
+.mo-next-title { font-family: var(--sans); }
+.mo-pad-picker, .mo-transpose-dialog, .setlist-modal-card,
+.modal-box, .eq-panel {
+  border-radius: 20px !important;
+}
+.mo-pad-note-option { border-radius: 9px; }
+.mo-pad-voice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--mut);
+}
+.mo-pad-voice select {
+  color: var(--ink);
+  background: var(--raise);
+  border: 1px solid var(--line2);
+  border-radius: 7px;
+  padding: 5px 8px;
+}
+.modal-drop { border-radius: var(--radius-card) !important; }
+#userDropdown { border-radius: 16px !important; }
+
+/* En horizontal compacto se conserva espacio para las ondas y los faders. */
+@media (max-height: 539px) {
+  :root { --radius-panel: 13px; --radius-card: 9px; }
+  .c-head { padding: 5px 10px !important; }
+  .c-title { flex-direction: row; align-items: baseline; gap: 10px; }
+  .c-title strong { font-size: 12px !important; }
+  .c-meta { font-size: 10px !important; }
+  #editionSongItemsList { gap: 5px !important; }
+  #editionSongItemsList .song-card { padding: 6px 8px !important; }
+  .mixer-toolbar { padding: 5px 10px !important; }
+  .edition-workspace { gap: 7px !important; }
+  .mo-hero-card { border-radius: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .song-card, .btn, .mo-pad-note-option { transition: none !important; }
+}
+

@@ -8,11 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (MSVC)
     add_compile_options(/O2 /Oi /fp:fast)
 else()
-    add_compile_options(-O3 -ffast-math -fvisibility=hidden)
+    add_compile_options(-O3 -fvisibility=hidden)
 endif()
 
 # Enable ARM NEON on ARM64 platforms
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv7")
     if (NOT MSVC)
         add_compile_options(-mfpu=neon)
     endif()
@@ -37,11 +37,7 @@ target_include_directories(pulso_core PUBLIC
 )
 
 # Platform-specific link libraries
-if (ANDROID)
-    find_library(log-lib log)
-    find_library(aaudio-lib aaudio)
-    target_link_libraries(pulso_core PRIVATE ${log-lib} ${aaudio-lib})
-elseif (APPLE)
+if (APPLE)
     find_library(AudioToolbox AudioToolbox)
     find_library(AVFoundation AVFoundation)
     target_link_libraries(pulso_core PRIVATE ${AudioToolbox} ${AVFoundation})

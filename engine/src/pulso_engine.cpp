@@ -3,6 +3,7 @@
 #include "lock_free_queue.h"
 
 #include <vector>
+#include <utility>
 #include <string>
 #include <cstring>
 #include <cmath>
@@ -43,6 +44,7 @@ struct EngineCommand {
 struct ChannelTrack {
     std::string name;
     std::vector<float> audioData;
+    std::vector<float> rightData;
     float currentGain = 0.8f;
     float targetGain = 0.8f;
     float pan = 0.0f;
@@ -58,6 +60,7 @@ public:
         : sampleRate_(sampleRate), bufferSize_(bufferSize) {
         channels_.resize(PULSO_MAX_CHANNELS);
         tempMixBuffer_.resize(bufferSize);
+        rightMixBuffer_.resize(bufferSize);
         padBuffer_.resize(bufferSize);
         clickBuffer_.resize(bufferSize);
 
@@ -67,6 +70,23 @@ public:
             padFrequencies_[i] = 130.8128f * std::pow(2.0f, static_cast<float>(i) / 12.0f);
         }
     }
+
+    bool loadStereo(const float* left, const float* right, uint32_t frames) {
+        if (!left || !right || !frames) return false;
+        ChannelTrack track;
+        track.audioData.assign(left, left + frames);
+        track.rightData.assign(right, right + frames);
+        track.targetGain = 1.0f;
+        channels_[0] = std::move(track);
+        durationFrames_ = frames;
+        currentFrameIndex_ = 0;
+        isPlaying_.store(false);
+        clickEnabled_.store(false);
+        return true;
+    }
+
+    float position() const { return position_.load(std::memory_order_relaxed); }
+    bool playing() const { return isPlaying_.load(std::memory_order_relaxed); }
 
     void pushCommand(const EngineCommand& cmd) {
         commandQueue_.push(cmd);
@@ -80,6 +100,7 @@ public:
         std::memset(masterR, 0, numFrames * sizeof(float));
         std::memset(cueL, 0, numFrames * sizeof(float));
         std::memset(cueR, 0, numFrames * sizeof(float));
+        position_.store(static_cast<float>(currentFrameIndex_) / sampleRate_, std::memory_order_relaxed);
 
         if (!isPlaying_.load(std::memory_order_relaxed)) {
             // Render ambient pad even when transport is stopped (stage atmosphere)
@@ -104,23 +125,26 @@ public:
 
             if (effectiveGain > 0.0001f) {
                 // Clear temp buffer
+                if (numFrames > bufferSize_) return;
                 std::memset(tempMixBuffer_.data(), 0, numFrames * sizeof(float));
+                std::memset(rightMixBuffer_.data(), 0, numFrames * sizeof(float));
 
                 // Fetch samples from channel audio data
                 for (uint32_t i = 0; i < numFrames; ++i) {
                     size_t sampleIdx = currentFrameIndex_ + i;
                     if (sampleIdx < track.audioData.size()) {
                         tempMixBuffer_[i] = track.audioData[sampleIdx];
+                        rightMixBuffer_[i] = track.rightData.empty() ? tempMixBuffer_[i] : track.rightData[sampleIdx];
                     }
                 }
 
                 // Vectorized mix into Master or Cue bus
                 if (track.bus == PULSO_BUS_MASTER) {
                     SimdMixer::mixChannel(masterL, tempMixBuffer_.data(), effectiveGain, numFrames);
-                    SimdMixer::mixChannel(masterR, tempMixBuffer_.data(), effectiveGain, numFrames);
+                    SimdMixer::mixChannel(masterR, rightMixBuffer_.data(), effectiveGain, numFrames);
                 } else {
                     SimdMixer::mixChannel(cueL, tempMixBuffer_.data(), effectiveGain, numFrames);
-                    SimdMixer::mixChannel(cueR, tempMixBuffer_.data(), effectiveGain, numFrames);
+                    SimdMixer::mixChannel(cueR, rightMixBuffer_.data(), effectiveGain, numFrames);
                 }
 
                 track.currentRms = SimdMixer::calculateRms(tempMixBuffer_.data(), numFrames) * effectiveGain;
@@ -137,8 +161,19 @@ public:
         // 3. Render Ambient Pad
         renderAmbientPad(masterL, masterR, numFrames);
 
+        for (uint32_t i = 0; i < numFrames; ++i) {
+            masterGain_ += (masterTarget_ - masterGain_) * (1.0f / (0.015f * sampleRate_));
+            masterL[i] *= masterGain_;
+            masterR[i] *= masterGain_;
+        }
+
         // 4. Advance Transport Playhead
         currentFrameIndex_ += numFrames;
+        if (durationFrames_ && currentFrameIndex_ >= durationFrames_) {
+            currentFrameIndex_ = durationFrames_;
+            isPlaying_.store(false, std::memory_order_relaxed);
+        }
+        position_.store(static_cast<float>(currentFrameIndex_) / sampleRate_, std::memory_order_relaxed);
         updateTimeSignature(numFrames);
 
         // 5. Apply Soft Limiter to avoid digital clipping
@@ -168,10 +203,11 @@ public:
 
 private:
     void processCommands() {
-        EngineCommand cmd;
+        EngineCommand cmd{};
         while (commandQueue_.pop(cmd)) {
             switch (cmd.type) {
                 case CommandType::Play:
+                    if (durationFrames_ && currentFrameIndex_ >= durationFrames_) currentFrameIndex_ = 0;
                     isPlaying_.store(true, std::memory_order_relaxed);
                     break;
                 case CommandType::Pause:
@@ -213,6 +249,9 @@ private:
                     if (cmd.intArg1 >= 0 && cmd.intArg1 < static_cast<int32_t>(channels_.size())) {
                         channels_[cmd.intArg1].bus = static_cast<PulsoBusType>(cmd.intArg2);
                     }
+                    break;
+                case CommandType::SetMasterGain:
+                    masterTarget_ = std::clamp(cmd.floatArg1, 0.0f, 3.2f);
                     break;
                 case CommandType::SetClickEnabled:
                     clickEnabled_.store(cmd.boolArg1, std::memory_order_relaxed);
@@ -329,7 +368,12 @@ private:
     float masterRmsR_ = 0.0f;
 
     std::vector<ChannelTrack> channels_;
+    size_t durationFrames_ = 0;
+    std::atomic<float> position_{0};
+    float masterGain_ = 1.0f;
+    float masterTarget_ = 1.0f;
     std::vector<float> tempMixBuffer_;
+    std::vector<float> rightMixBuffer_;
     std::vector<float> padBuffer_;
     std::vector<float> clickBuffer_;
 
@@ -351,30 +395,52 @@ PULSO_API void pulso_destroy_engine(void* engine) {
     }
 }
 
+PULSO_API bool pulso_load_stereo(void* engine, const float* left, const float* right, uint32_t frames) {
+    if (!engine) return false;
+    try { return static_cast<PulsoAudio::EngineImpl*>(engine)->loadStereo(left, right, frames); }
+    catch (...) { return false; }
+}
+
+PULSO_API float pulso_position(void* engine) {
+    return engine ? static_cast<PulsoAudio::EngineImpl*>(engine)->position() : 0;
+}
+
+PULSO_API bool pulso_is_playing(void* engine) {
+    return engine && static_cast<PulsoAudio::EngineImpl*>(engine)->playing();
+}
+
+PULSO_API void pulso_set_master_gain(void* engine, float gain) {
+    if (!engine || !std::isfinite(gain)) return;
+    PulsoAudio::EngineCommand cmd{};
+    cmd.type = PulsoAudio::CommandType::SetMasterGain;
+    cmd.floatArg1 = gain;
+    static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
+}
+
 PULSO_API void pulso_play(void* engine) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::Play;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
 }
 
 PULSO_API void pulso_pause(void* engine) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::Pause;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
 }
 
 PULSO_API void pulso_stop(void* engine) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::Stop;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
 }
 
 PULSO_API void pulso_set_bpm(void* engine, float bpm) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetBpm;
     cmd.floatArg1 = bpm;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
@@ -382,7 +448,7 @@ PULSO_API void pulso_set_bpm(void* engine, float bpm) {
 
 PULSO_API void pulso_jump_to_bar(void* engine, int32_t targetBar, bool quantizeToNextBar) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::JumpToBar;
     cmd.intArg1 = targetBar;
     cmd.boolArg1 = quantizeToNextBar;
@@ -391,7 +457,7 @@ PULSO_API void pulso_jump_to_bar(void* engine, int32_t targetBar, bool quantizeT
 
 PULSO_API void pulso_set_channel_gain(void* engine, int32_t channelIndex, float gain) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetChannelGain;
     cmd.intArg1 = channelIndex;
     cmd.floatArg1 = gain;
@@ -400,7 +466,7 @@ PULSO_API void pulso_set_channel_gain(void* engine, int32_t channelIndex, float 
 
 PULSO_API void pulso_set_channel_mute(void* engine, int32_t channelIndex, bool muted) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetChannelMute;
     cmd.intArg1 = channelIndex;
     cmd.boolArg1 = muted;
@@ -409,7 +475,7 @@ PULSO_API void pulso_set_channel_mute(void* engine, int32_t channelIndex, bool m
 
 PULSO_API void pulso_set_channel_solo(void* engine, int32_t channelIndex, bool solo) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetChannelSolo;
     cmd.intArg1 = channelIndex;
     cmd.boolArg1 = solo;
@@ -418,7 +484,7 @@ PULSO_API void pulso_set_channel_solo(void* engine, int32_t channelIndex, bool s
 
 PULSO_API void pulso_set_channel_bus(void* engine, int32_t channelIndex, PulsoBusType bus) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetChannelBus;
     cmd.intArg1 = channelIndex;
     cmd.intArg2 = static_cast<int32_t>(bus);
@@ -427,7 +493,7 @@ PULSO_API void pulso_set_channel_bus(void* engine, int32_t channelIndex, PulsoBu
 
 PULSO_API void pulso_set_click_enabled(void* engine, bool enabled) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetClickEnabled;
     cmd.boolArg1 = enabled;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
@@ -435,7 +501,7 @@ PULSO_API void pulso_set_click_enabled(void* engine, bool enabled) {
 
 PULSO_API void pulso_set_click_volume(void* engine, float volume) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::SetClickVolume;
     cmd.floatArg1 = volume;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);
@@ -443,7 +509,7 @@ PULSO_API void pulso_set_click_volume(void* engine, float volume) {
 
 PULSO_API void pulso_start_ambient_pad(void* engine, int32_t keyIndex, float volume) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::StartAmbientPad;
     cmd.intArg1 = keyIndex;
     cmd.floatArg1 = volume;
@@ -452,7 +518,7 @@ PULSO_API void pulso_start_ambient_pad(void* engine, int32_t keyIndex, float vol
 
 PULSO_API void pulso_stop_ambient_pad(void* engine, float fadeOutSeconds) {
     if (!engine) return;
-    PulsoAudio::EngineCommand cmd;
+    PulsoAudio::EngineCommand cmd{};
     cmd.type = PulsoAudio::CommandType::StopAmbientPad;
     cmd.floatArg1 = fadeOutSeconds;
     static_cast<PulsoAudio::EngineImpl*>(engine)->pushCommand(cmd);

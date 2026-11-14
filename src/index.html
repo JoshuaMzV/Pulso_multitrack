@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>PULSO — Multitrack Stage System</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23f0a542'/%3E%3Cpath d='M25 14v36l27-18z' fill='%23111'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/fonts.css">
+<script src="vendor/lucide.min.js"></script>
+
+<script src="vendor/jszip.min.js"></script>
+<link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/show.css">
+  <link rel="stylesheet" href="styles/refinement.css">
+</head>
+<body>
+<div class="grain"></div>
+
+<!-- ==========================================================================
+     TOP HEADER CON SELECTOR EDICIÓN / SHOW
+     ========================================================================== -->
+<header class="app-header">
+  <!-- Transporte en la Barra Superior: Play, Stop y Duración -->
+  <div class="header-transport-cluster">
+    <button class="hdr-play-btn" id="headerPlayBtn" aria-label="Play / Pausa">
+      <i data-lucide="play" id="headerPlayIcon"></i>
+    </button>
+    <button class="hdr-stop-btn" id="headerStopBtn" aria-label="Detener">
+      <i data-lucide="square"></i>
+    </button>
+    <div class="hdr-time-box">
+      <span class="hdr-time-main" id="headerTimeMain">00:00</span>
+      <span class="hdr-time-dur" id="headerTimeDur">0:00 / 2:27</span>
+    </div>
+    <div class="hdr-bar-box">
+      <span class="hdr-bar-disp" id="barDisp">COMPÁS 1.1</span>
+      <div class="beat-dots" id="beatDots">
+        <span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span><span class="beat-dot"></span>
+      </div>
+    </div>
+  </div>
+
+  <nav class="view-hub" aria-label="Modo de vista">
+    <button class="view-hub-btn" id="btnViewEdition">
+      <i data-lucide="sliders"></i><span>EDICIÓN</span>
+    </button>
+    <button class="view-hub-btn active show-mode" id="btnViewShow">
+      <i data-lucide="zap"></i><span>SHOW</span>
+    </button>
+  </nav>
+
+  <div class="top-right-bar">
+    <button type="button" class="btn btn-ghost btn-sm" id="btnRedundancy" aria-haspopup="dialog">A/B</button>
+    <div id="headerAccountSlot"></div>
+    <div class="user-menu-wrapper" id="userMenuWrapper">
+      <button class="role-toggle" id="roleToggleBtn" title="Gestionar cuenta y rol">
+        <span class="account-avatar" aria-hidden="true"><i data-lucide="user"></i></span>
+        <span id="roleCrown" class="user-crown"></span>
+        <span id="roleLabel">CUENTA</span>
+        <span class="role-badge guest" id="roleBadge">LOGIN</span>
+      </button>
+      <div class="user-dropdown" id="userDropdown">
+        <div class="ud-header">
+          <div class="ud-username">
+            <span id="udCrown" class="user-crown"></span>
+            <span id="udUsername">Invitado</span>
+            <span id="udRoleBadge" class="role-badge guest">INVITADO</span>
+          </div>
+          <div style="font-size:10px; color:var(--mut); font-family:var(--mono);" id="udGroupText">Modo local</div>
+        </div>
+        <div class="ud-divider"></div>
+        <button class="ud-item" id="udBtnLogin" onclick="openAuthModal('login'); closeUserDropdown();">
+          <i data-lucide="log-in"></i> Iniciar Sesión
+        </button>
+        <button class="ud-item" id="udBtnRegister" onclick="openAuthModal('register'); closeUserDropdown();">
+          <i data-lucide="ticket"></i> Canjear Invitación
+        </button>
+        <button class="ud-item" id="udBtnInvites" style="display:none;" onclick="openAdminInvitesModal(); closeUserDropdown();">
+          <i data-lucide="key"></i> Gestionar Invitaciones
+        </button>
+        <button class="ud-item" id="udBtnGroups" style="display:none;" onclick="openAdminGroupsModal(); closeUserDropdown();">
+          <i data-lucide="users"></i> Ver grupos y cuentas
+        </button>
+        <button class="ud-item" id="udBtnGroup" style="display:none;" onclick="openCurrentGroupModal(); closeUserDropdown();">
+          <i data-lucide="users"></i> Mi grupo e integrantes
+        </button>
+        <button class="ud-item" id="udBtnMemberInvite" style="display:none;" onclick="createMemberInvite(); closeUserDropdown();">
+          <i data-lucide="user-plus"></i> Invitar miembro
+        </button>
+        <div class="ud-divider"></div>
+        <div class="settings-row" id="themeToggleRow" role="button" tabindex="0" aria-label="Cambiar entre tema claro y oscuro">
+          <div class="settings-row-label">
+            <i data-lucide="sun"></i>
+            <div>Tema claro</div>
+          </div>
+          <div class="theme-switch" id="themeSwitch"></div>
+        </div>
+        <div class="ud-divider" id="udLogoutDivider" style="display:none;"></div>
+        <button class="ud-item danger" id="udBtnLogout" style="display:none;" onclick="logoutUser(); closeUserDropdown();">
+          <i data-lucide="log-out"></i> Cerrar Sesión
+        </button>
+      </div>
+    </div>
+    <button class="btn btn-amber" id="openUploadBtn" title="Subir nueva canción a la nube (stems.tld-list.lat)">
+      <i data-lucide="cloud-upload"></i><span>+ SUBIR CANCIÓN</span>
+    </button>
+  </div>
+</header>
+
+<!-- ==========================================================================
+     VISTA SHOW
+     ========================================================================== -->
+<section class="view-container active" id="viewShow">
+    <!-- MODERN SHOW LAYOUT -->
+  <div class="show-layout-modern" id="showLayoutModern">
+    <div class="mo-top-nav">
+      <button class="mo-nav-btn" onclick="document.getElementById('stageSliderPrev').click()">&lt;</button>
+      <button class="mo-nav-center" onclick="document.getElementById('btnSelectSetlistShow').click()">
+        <span id="moSetlistName">SETLIST</span> <span id="moSetlistCount">0/0</span>
+      </button>
+      <button class="mo-nav-btn" onclick="document.getElementById('stageSliderNext').click()">&gt;</button>
+    </div>
+
+    <div class="mo-hero-card" id="moHeroCard">
+      <div class="mo-hero-overlay"></div>
+      <div class="mo-hero-content">
+        <div class="mo-hc-top">
+          <div class="mo-hc-top-left">
+            <h1 class="mo-hc-title" id="moHeroTitle">TITULO</h1>
+            <h2 class="mo-hc-artist" id="moHeroArtist">ARTISTA</h2>
+          </div>
+          <div class="mo-hc-top-right">
+            <button type="button" class="mo-hc-key" id="moHeroKey" aria-label="Cambiar tonalidad de la canción" aria-haspopup="dialog" aria-expanded="false" onclick="openTransposePicker()">C</button>
+            <div class="mo-hc-tempo" id="moHeroTempo">120 BPM - 4/4</div>
+          </div>
+        </div>
+        <div class="mo-hc-bottom">
+          <div class="mo-hc-bottom-left">
+            <span class="mo-hc-sec-lbl">SECCIÓN</span>
+            <h3 class="mo-hc-sec-title" id="moHeroSec">INICIO</h3>
+            <span class="mo-hc-sec-next" id="moHeroNextSec"></span>
+          </div>
+          <div class="mo-hc-bottom-right">
+            <div class="mo-hc-time-rem" id="moHeroTime">0:00</div>
+            <div class="mo-hc-time-lbl">RESTANTE</div>
+            <button class="mo-hc-loop-btn" id="moHeroLoopBtn" onclick="if(typeof toggleSectionLoop === 'function') toggleSectionLoop()"><i data-lucide="repeat"></i> LOOP</button>
+          </div>
+        </div>
+      </div>
+      <div class="mo-hero-prog-track">
+        <div class="mo-hero-prog-bar" id="moHeroProgress"></div>
+      </div>
+    </div>
+
+    <div class="mo-arranger-carousel" id="moArrangerCarousel">
+      <!-- Inyectado por JS -->
+    </div>
+
+    <div class="mo-next-card" id="moNextCard" onclick="document.getElementById('stageSliderNext').click()">
+      <div class="mo-next-left">
+        <span class="mo-next-lbl">SIGUIENTE</span>
+        <div class="mo-next-thumb" id="moNextThumb"></div>
+        <div class="mo-next-info">
+          <h4 id="moNextTitle">Siguiente Canción</h4>
+          <span id="moNextArtist">Artista</span>
+        </div>
+      </div>
+      <div class="mo-next-right">
+        <div class="mo-next-key" id="moNextKey">-</div>
+        <div class="mo-next-arrow">›</div>
+      </div>
+    </div>
+
+    <div class="mo-bottom-bar">
+      <button class="mo-pad-btn" id="moPadBtn" aria-haspopup="dialog" aria-expanded="false" onclick="openMoPadPicker()">
+        <i data-lucide="radio"></i> PAD &middot; <span id="moPadKey">E</span> <span class="mo-pad-led" id="moPadLed"></span>
+      </button>
+
+      <div class="mo-master-ctrl">
+        <span class="mo-master-lbl">MASTER</span>
+        <input type="range" class="mo-master-slider" id="moMasterSlider" min="-60" max="10" step="0.1" value="0" aria-label="Volumen master en decibelios">
+        <span class="mo-master-db" id="moMasterDb">0.0 dB</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="mo-pad-picker-backdrop" id="moPadPicker" aria-hidden="true" onclick="if(event.target === this) closeMoPadPicker()">
+    <section class="mo-pad-picker" role="dialog" aria-modal="true" aria-labelledby="moPadPickerTitle" onclick="event.stopPropagation()">
+      <header class="mo-pad-picker-header">
+        <div>
+          <h2 id="moPadPickerTitle">TONALIDAD DEL PAD</h2>
+          <span id="moPadPickerSongKey">Sin canción activa</span>
+        </div>
+        <button type="button" class="mo-pad-picker-close" aria-label="Cerrar selector de tonalidad" onclick="closeMoPadPicker()">×</button>
+      </header>
+      <div class="mo-pad-note-grid" id="moPadNoteGrid" aria-label="Notas disponibles"></div>
+      <label class="mo-pad-voice">Sonido
+        <select id="moPadVoice">
+          <option value="mi">Nota sola</option>
+          <option value="mi-si">Nota + quinta</option>
+        </select>
+      </label>
+      <footer class="mo-pad-picker-footer">
+        <label class="mo-pad-follow-option">
+          <input type="checkbox" id="moPadFollowToggle" onchange="setMoPadFollowSetlist(this.checked)">
+          <span>Seguir tonalidad de cada canción</span>
+        </label>
+        <button type="button" class="mo-pad-power-toggle" id="moPadPowerToggle" onclick="document.getElementById('prPowerBtn').click()">ENCENDER PAD</button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="mo-transpose-backdrop" id="moTransposePicker" aria-hidden="true" onclick="if(event.target === this) closeTransposePicker()">
+    <section class="mo-transpose-dialog" role="dialog" aria-modal="true" aria-labelledby="moTransposeTitle" onclick="event.stopPropagation()">
+      <header class="mo-pad-picker-header">
+        <div>
+          <h2 id="moTransposeTitle">TRANSPONER CANCIÓN</h2>
+          <span id="moTransposeSummary">Sonando: C</span>
+        </div>
+        <button type="button" class="mo-pad-picker-close" aria-label="Cerrar selector de transposición" onclick="closeTransposePicker()">×</button>
+      </header>
+      <div class="mo-pad-note-grid" id="moTransposeNoteGrid" aria-label="Tonalidades de transposición"></div>
+      <footer class="mo-transpose-footer">
+        <span>El tempo se conserva. Click, guía y batería quedan sin transponer.</span>
+      </footer>
+    </section>
+  </div>
+
+
+    <!-- ====================================================================
+         CARRUSEL DESLIZANTE DE TODAS LAS CARÁTULAS DEL SETLIST
+         ==================================================================== -->
+    <div class="stage-slider-section">
+      
+      <!-- Barra Superior de Navegación del Carrusel -->
+      <div class="stage-slider-nav-bar">
+        <div class="ssn-left">
+          <button type="button" class="setlist-pill-btn" id="btnSelectSetlistShow" title="Cambiar o crear setlist">
+            <i data-lucide="layers"></i>
+            <span class="setlist-current-name" id="showSetlistName">SETLIST DOMINGO</span>
+            <i data-lucide="chevron-down" class="setlist-chevron"></i>
+          </button>
+        </div>
+        <div class="ssn-right">
+          <button type="button" class="ssn-nav-btn" id="stageSliderPrev" aria-label="Deslizar canciones a la izquierda" title="Deslizar a la izquierda">
+            <i data-lucide="chevron-left"></i>
+          </button>
+          <span class="ssn-scroll-hint">DESLIZAR / ARRASTRAR</span>
+          <button type="button" class="ssn-nav-btn" id="stageSliderNext" aria-label="Deslizar canciones a la derecha" title="Deslizar a la derecha">
+            <i data-lucide="chevron-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Viewport Deslizante Horizontal -->
+      <div class="stage-slider-viewport" id="stageSliderViewport">
+        <div class="stage-slider-track" id="stageSliderTrack">
+          <!-- Renderizado dinámico de todas las carátulas con conectores de transición -->
+        </div>
+      </div>
+
+    </div>
+<div class="show-layout" style="display:none !important; visibility:hidden !important; position:absolute !important; width:0; height:0;" id="legacyShowLayout">
+
+
+    <!-- ====================================================================
+         CONSOLA MASTER CENTRADA (PAD CONTINUO + MEDIDOR L/R + FADER MASTER)
+         ==================================================================== -->
+    <div class="stage-master-wrap">
+      <div class="stage-master-console" id="stageMasterConsole">
+
+        <!-- Cuerpo Minimalista: Módulo Pad Radio + Módulo Master Fader -->
+        <div class="sm-body">
+
+          <!-- 2. SINTETIZADOR DE PAD CONTINUO TIPO RADIO VINTAGE -->
+          <div class="stage-pad-radio-card" id="stagePadRadioCard">
+
+            <!-- 1. Cabecera del Pad Radio -->
+            <div class="pr-head">
+              <div class="pr-head-left">
+                <span class="pr-led" id="prPulseLed" aria-hidden="true"></span>
+                <span class="pr-title">PAD CONTINUO</span>
+                <span class="pr-status-badge" id="prStatusBadge">en espera</span>
+              </div>
+              <div class="pr-head-right">
+                <label class="pr-follow-toggle" title="Seguir automáticamente la tonalidad de la canción activa en el setlist">
+                  <input type="checkbox" id="prFollowSetlist" checked />
+                  <span class="pr-switch-track">
+                    <span class="pr-switch-thumb"></span>
+                  </span>
+                  <span class="pr-follow-label">sigue al setlist</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 2. Fila Unificada: Cuadro de Tonalidad + Cinta Giratoria de Sintonización -->
+            <div class="pr-tuning-row">
+              <!-- Cuadro de Tonalidad (E MAYOR) -->
+              <div class="pr-screen" id="prScreen">
+                <div class="pr-screen-left">
+                  <div class="pr-big-key" id="prBigKey">E</div>
+                  <div class="pr-key-mode" id="prKeyMode">MAYOR</div>
+                </div>
+              </div>
+
+              <!-- Cinta Giratoria de Selección de Tonalidad (Rotary Tape Ribbon Dial) -->
+              <div class="pr-tape-module">
+                <div class="pr-tape-header">
+                  <div class="pr-tape-title-box">
+                    <span class="pr-tape-icon" aria-hidden="true">⏣</span>
+                    <span class="pr-tape-title">CINTA GIRATORIA · SELECTOR DE TONALIDAD</span>
+                  </div>
+                  <div class="pr-tape-nav">
+                    <button type="button" class="pr-tape-btn" id="prTapePrevBtn" title="Girar a nota anterior (semitono descendente)">‹</button>
+                    <span class="pr-tape-hint">DESLIZA O GIRA</span>
+                    <button type="button" class="pr-tape-btn" id="prTapeNextBtn" title="Girar a nota siguiente (semitono ascendente)">›</button>
+                  </div>
+                </div>
+
+                <div class="pr-tape-chassis" id="prTapeChassis" title="Arrastra la cinta horizontalmente o usa la rueda del ratón para sintonizar la nota">
+                  <!-- Aguja indicadora central fija (Hairline Amber Needle) -->
+                  <div class="pr-tape-needle" aria-hidden="true">
+                    <span class="pr-needle-pip top">▼</span>
+                    <span class="pr-needle-hairline"></span>
+                    <span class="pr-needle-pip btm">▲</span>
+                  </div>
+
+                  <!-- Viewport con máscara de desvanecimiento lateral tipo tambor de cinta -->
+                  <div class="pr-tape-viewport" id="prTapeViewport">
+                    <div class="pr-tape-ribbon" id="prTapeRibbon">
+                      <!-- Generado dinámicamente: ciclos continuos de notas con reglas y marcas milimétricas -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Faders Horizontales (Shimmer, Espacial, Brillo) + Puente & Encender Pad -->
+            <div class="pr-bottom-grid">
+              <!-- Fader 1: SHIMMER -->
+              <div class="pr-fader-cell">
+                <div class="pr-fader-track" id="faderTrackShimmer" data-fader="shimmer" title="Shimmer: capa armónica brillante (clic o arrastra)">
+                  <div class="pr-fader-groove"></div>
+                  <div class="pr-fader-bar" id="faderBarShimmer" style="width: 50%;"></div>
+                  <div class="pr-fader-thumb" id="faderThumbShimmer" style="left: 50%;"></div>
+                </div>
+                <span class="pr-fader-label">SHIMMER</span>
+              </div>
+
+              <!-- Fader 2: ESPACIAL -->
+              <div class="pr-fader-cell">
+                <div class="pr-fader-track" id="faderTrackEspacial" data-fader="espacial" title="Espacial: delay estéreo y ambiente espacial (clic o arrastra)">
+                  <div class="pr-fader-groove"></div>
+                  <div class="pr-fader-bar" id="faderBarEspacial" style="width: 65%;"></div>
+                  <div class="pr-fader-thumb" id="faderThumbEspacial" style="left: 65%;"></div>
+                </div>
+                <span class="pr-fader-label">ESPACIAL</span>
+              </div>
+
+              <!-- Fader 3: BRILLO -->
+              <div class="pr-fader-cell">
+                <div class="pr-fader-track" id="faderTrackBrillo" data-fader="brillo" title="Brillo: filtro de corte de agudos y calidez (clic o arrastra)">
+                  <div class="pr-fader-groove"></div>
+                  <div class="pr-fader-bar" id="faderBarBrillo" style="width: 55%;"></div>
+                  <div class="pr-fader-thumb" id="faderThumbBrillo" style="left: 55%;"></div>
+                </div>
+                <span class="pr-fader-label">BRILLO</span>
+              </div>
+
+              <!-- Bloque Derecho: Puente a la siguiente + Botón Encender Pad -->
+              <div class="pr-action-cell">
+                <div class="pr-bridge-box" id="prBridgeBox">
+                  <div class="pr-bridge-title">PUENTE A LA SIGUIENTE</div>
+                  <div class="pr-bridge-val" id="prBridgeVal">E → D · 4 compases</div>
+                </div>
+                <button type="button" class="pr-power-btn" id="prPowerBtn" title="Encender o apagar el Pad Continuo">
+                  ENCENDER PAD
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 3. CLUSTER DE SALIDA MASTER (PRIMERO: MEDIDOR L/R EN LÍNEA, LUEGO: FADER MASTER) -->
+          <div class="stage-master-output-cluster">
+
+            <!-- MEDIDOR ESTÉREO EN LÍNEA ULTRA DELGADA (PRIMERO, CON L Y R) -->
+            <div class="sm-line-meter-box">
+              <div class="sm-line-labels">
+                <span>L</span>
+                <span>R</span>
+              </div>
+              <div class="sm-line-canvas-frame">
+                <canvas id="stageStereoCanvas" class="stage-line-stereo-canvas" width="20" height="220" role="img" aria-label="Medidor estéreo canal L y R"></canvas>
+              </div>
+            </div>
+
+            <!-- FADER MASTER (LUEGO) -->
+            <div class="sm-fader-box">
+              <div class="sm-fader-top">
+                <div class="sm-fader-title-group">
+                  <span class="sm-runled" id="stageMasterLed" aria-hidden="true"></span>
+                  <span class="sm-fader-title">FADER MASTER</span>
+                </div>
+                <span class="sm-db-display" id="stageMasterDbText">-1.4 dB</span>
+                <span class="sm-fader-status" id="stageMasterStatus">ACTIVO</span>
+              </div>
+
+              <div class="sm-fader-stage">
+                <div class="sm-fader-scale">
+                  <span>+6</span>
+                  <span>+3</span>
+                  <span class="zero">0 dB</span>
+                  <span>-6</span>
+                  <span>-12</span>
+                  <span>-18</span>
+                  <span>-30</span>
+                  <span>-inf</span>
+                </div>
+
+                <div class="sm-track" id="stageMasterTrack" role="slider" aria-label="Control deslizante Master" aria-valuemin="0" aria-valuemax="100" aria-valuenow="85" style="--v: 0.85;">
+                  <div class="sm-groove"></div>
+                  <div class="sm-fader-cap" id="stageMasterFader" style="--v: 0.85;">
+                    <div class="sm-cap-grip"></div>
+                    <div class="sm-cap-line"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sm-fader-actions">
+                <button class="chbtn bm sm-mute-btn" id="stageMasterMuteBtn" data-stem="master" title="Silenciar Master">M</button>
+                <button class="sm-quick-btn" id="stageMasterUnityBtn" title="Fijar ganancia a 0 dB (Unidad)">0 dB</button>
+                <button class="sm-quick-btn" id="stageMasterMinusBtn" title="Atenuar -6 dB">-6 dB</button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     VISTA EDICIÓN
+     ========================================================================== -->
+<section class="view-container" id="viewEdition">
+  <div class="edition-layout" id="editionLayout">
+    <aside class="edition-sidebar" id="editionSidebar">
+      <div class="sidebar-header">
+        <button type="button" class="setlist-pill-btn sidebar-setlist-btn" id="btnSelectSetlistEdition" title="Cambiar o crear setlist">
+          <i data-lucide="layers"></i>
+          <span class="setlist-current-name" id="editionSetlistName">SETLIST DOMINGO</span>
+          <i data-lucide="chevron-down" class="setlist-chevron"></i>
+        </button>
+        <button type="button" class="btn btn-ghost" id="btnSidebarAddSong" style="padding:4px 8px;font-size:11px;flex-shrink:0;" title="Agregar canción al setlist (desde Nube o Local)" aria-label="Agregar canción">+</button>
+      </div>
+      <div class="song-items-list" id="editionSongItemsList">
+        <!-- Generado dinámicamente con opciones interactivas para reordenar -->
+      </div>
+      <div id="sidebarAccountSlot" class="sidebar-account-slot"></div>
+    </aside>
+
+    <main class="edition-main" id="editionMain">
+      <div class="edition-workspace">
+        <!-- 1. CUADRO 1: CONSOLA MULTITRACK (TIMELINE SUPERIOR) -->
+        <section class="console console-timeline-card" id="editionConsole" aria-label="Consola de edición multitrack">
+          <div class="c-head">
+            <span class="runled" id="runLed" role="img" data-load="idle" aria-label="Sin pistas cargadas" title="Sin pistas cargadas"></span>
+            <div class="c-title">
+              <strong id="cSongTitle">SELECCIONA UNA CANCIÓN</strong>
+              <span class="c-meta" id="cSongMeta">VACÍO</span>
+              
+            </div>
+            <div class="edition-song-actions">
+              <button type="button" class="btn btn-ghost btn-xs" id="btnArranger" onclick="toggleArranger()">
+                <i data-lucide="layout-template" style="width:14px;height:14px;"></i> ARRANGER
+              </button>
+              <button type="button" class="btn btn-amber btn-xs" id="btnSaveArranger" onclick="saveSongArranger(event)" title="Guardar mezcla, tonalidad y secciones">Guardar</button>
+            </div>
+          </div>
+
+          <div class="c-main">
+            <!-- TIMELINE (FORMAS DE ONDA EN BARRAS) -->
+            <div class="timeline" id="timelineContainer">
+              <div class="tl-zoom-container" id="tlZoomContainer">
+                <div class="tl-band" id="tlBand"></div>
+                <div class="tl-ruler" id="tlRuler"></div>
+                <div class="tl-tracks" id="tlTracks"></div>
+                <div class="tl-hit" id="tlHit" title="Clic para saltar a ese punto"></div>
+                <div class="playhead" id="playhead"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. CUADRO 2: MEZCLADOR DE PISTAS SEPARADO (APROVECHAMIENTO TOTAL DEL ESPACIO) -->
+        <section class="console console-mixer-card" id="editionMixerSection" aria-label="Mezclador de pistas multitrack">
+          <div class="mixer-wrapper">
+            <div class="mixer-toolbar">
+              <div class="mixer-badge-title">
+                <i data-lucide="sliders" style="width:14px;height:14px;color:var(--amber);"></i>
+                <span>MEZCLADOR DE PISTAS (STEMS)</span>
+                <span class="mixer-badge-count" id="stemCountBadge">0 STEMS</span>
+              </div>
+              <div class="mixer-toolbar-right">
+              </div>
+            </div>
+            <div class="mixer" id="mixer" role="region" aria-label="Faders de canales de audio"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- Modal In-App Upload (Modern Studio 3-Step Wizard) -->
+
+<!-- ==========================================================================
+     MODAL DE AUTENTICACIÓN (LOGIN Y CANJE DE INVITACIÓN)
+     ========================================================================== -->
+<div class="modal-backdrop" id="authModal">
+  <div class="modal-box" style="max-width: 440px; width: 92%;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <h3 style="margin:0; font-size:16px; font-weight:800; color:var(--ink); font-family:var(--mono); display:flex; align-items:center; gap:8px;">
+        <i data-lucide="shield-check" style="color:var(--amber); width:18px; height:18px;"></i>
+        ACCESO PULSO
+      </h3>
+      <button class="btn btn-ghost btn-xs" onclick="closeAuthModal();" style="padding:4px 8px;">✕</button>
+    </div>
+
+    <!-- Pestañas Login / Registro -->
+    <div class="auth-tabs">
+      <button class="auth-tab-btn active" id="authTabLogin" onclick="switchAuthTab('login')">INICIAR SESIÓN</button>
+      <button class="auth-tab-btn" id="authTabRegister" onclick="switchAuthTab('register')">CANJEAR CÓDIGO</button>
+    </div>
+
+    <!-- Alertas -->
+    <div class="auth-alert" id="authAlert"></div>
+
+    <!-- Formulario 1: Login -->
+    <form id="formAuthLogin" onsubmit="handleAuthLogin(event);">
+      <div class="auth-field">
+        <label>NOMBRE DE USUARIO</label>
+        <input type="text" class="auth-input" id="loginUsername" placeholder="Ej. pastor_david" required autocomplete="username">
+      </div>
+      <div class="auth-field">
+        <label>CONTRASEÑA</label>
+        <input type="password" class="auth-input" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <div style="margin-top:24px; display:flex; gap:10px;">
+        <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeAuthModal();">Cancelar</button>
+        <button type="submit" class="btn btn-amber" style="flex:2;" id="btnLoginSubmit">
+          <i data-lucide="log-in"></i><span>ENTRAR</span>
+        </button>
+      </div>
+    </form>
+
+    <!-- Formulario 2: Registro con Código -->
+    <form id="formAuthRegister" style="display:none;" onsubmit="handleAuthRegister(event);">
+      <div class="auth-field">
+        <label>CÓDIGO DE INVITACIÓN</label>
+        <input type="text" class="auth-input" id="regInviteCode" placeholder="Ej. USER-XXXX-XXXX" required autocomplete="off" oninput="onInviteCodeInput(this.value);" style="text-transform:uppercase; letter-spacing:1px; font-weight:800; color:var(--amber);">
+        <div id="regInviteHint" style="font-size:10px; color:var(--mut); margin-top:4px; font-family:var(--mono);">
+          Ingresa tu código de invitación para configurar tu cuenta y grupo.
+        </div>
+      </div>
+      <div class="auth-field">
+        <label>ELIGE TU NOMBRE DE USUARIO</label>
+        <input type="text" class="auth-input" id="regUsername" placeholder="Ej. lider_marcos" required autocomplete="username">
+      </div>
+      <div class="auth-field">
+        <label>ELIGE UNA CONTRASEÑA</label>
+        <input type="password" class="auth-input" id="regPassword" placeholder="Mínimo 6 caracteres" required minlength="6" autocomplete="new-password">
+      </div>
+      <div class="auth-field" id="regOrgField">
+        <label>ORGANIZACIÓN</label>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <label style="flex:1; display:flex; align-items:center; gap:6px; padding:9px; border:1px solid var(--line); border-radius:6px; cursor:pointer;"><input type="radio" name="regGroupMode" value="create" onchange="updateRegistrationGroupMode();"> Crear grupo</label>
+          <label style="flex:1; display:flex; align-items:center; gap:6px; padding:9px; border:1px solid var(--line); border-radius:6px; cursor:pointer;"><input type="radio" name="regGroupMode" value="join" onchange="updateRegistrationGroupMode();"> Unirme</label>
+        </div>
+        <div id="regCreateGroupFields" style="display:none;">
+          <input type="text" class="auth-input" id="regGroupName" placeholder="Nombre del grupo o ministerio" maxlength="60">
+        </div>
+        <div id="regJoinGroupFields" style="display:none;">
+          <select class="auth-input" id="regGroupSelect"><option value="">Selecciona un grupo existente</option></select>
+        </div>
+      </div>
+      <div style="margin-top:24px; display:flex; gap:10px;">
+        <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeAuthModal();">Cancelar</button>
+        <button type="submit" class="btn btn-amber" style="flex:2;" id="btnRegisterSubmit">
+          <i data-lucide="check-circle-2"></i><span>CREAR CUENTA</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="passwordChangeModal">
+  <div class="modal-box" style="max-width:420px; width:92%;">
+    <h3 style="margin:0 0 10px; font-family:var(--mono);">CAMBIA TU CONTRASEÑA</h3>
+    <p style="font-size:12px; color:var(--mut); margin-bottom:16px;">Tu contraseña temporal debe reemplazarse antes de continuar.</p>
+    <form onsubmit="handlePasswordChange(event);">
+      <input class="auth-input" id="newPasswordInput" type="password" minlength="6" required placeholder="Nueva contraseña (mínimo 6 caracteres)" autocomplete="new-password">
+      <div id="passwordChangeFeedback" style="display:none; margin-top:10px; font-size:11px; color:var(--green);"></div>
+      <button class="btn btn-amber" type="submit" style="width:100%; margin-top:16px;">GUARDAR CONTRASEÑA</button>
+    </form>
+  </div>
+</div>
+
+<!-- ========================================================================== 
+     MODAL DE ADMINISTRACIÓN DE INVITACIONES (SOLO ADMIN)
+     ========================================================================== -->
+<div class="modal-backdrop" id="adminInvitesModal">
+  <div class="modal-box" style="max-width: 600px; width: 92%; max-height: 85vh; overflow-y: auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <h3 style="margin:0; font-size:16px; font-weight:800; color:var(--ink); font-family:var(--mono); display:flex; align-items:center; gap:8px;">
+        <i data-lucide="key" style="color:var(--amber); width:18px; height:18px;"></i>
+        CÓDIGOS DE INVITACIÓN
+      </h3>
+      <button class="btn btn-ghost btn-xs" onclick="closeAdminInvitesModal();" style="padding:4px 8px;">✕</button>
+    </div>
+
+    <!-- Generador de nuevo código -->
+    <div style="background:var(--raise); border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:20px;">
+      <div style="font-family:var(--mono); font-size:11px; font-weight:800; color:var(--amber); margin-bottom:10px;">
+        GENERAR NUEVA INVITACIÓN
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <select id="inviteRoleSelect" class="auth-input" style="flex:2; min-width:180px;">
+          <option value="user">USER (Sube, edita y organiza multitracks)</option>
+        </select>
+        <button class="btn btn-amber" style="flex:1; min-width:140px;" onclick="generateInviteCode();" id="btnGenInvite">
+          <i data-lucide="plus-circle"></i><span>GENERAR</span>
+        </button>
+      </div>
+      <div id="inviteGenFeedback" style="margin-top:10px; display:none; padding:8px 10px; border-radius:6px; background:rgba(67, 185, 124, 0.15); color:var(--green); font-family:var(--mono); font-size:11px;"></div>
+    </div>
+
+    <!-- Lista de códigos activos -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <span style="font-family:var(--mono); font-size:11px; font-weight:800; color:var(--mut);">HISTORIAL DE INVITACIONES</span>
+      <button class="btn btn-ghost btn-xs" onclick="loadAdminInvites();" title="Recargar"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> Actualizar</button>
+    </div>
+
+    <div class="invite-filter-tabs" role="tablist" aria-label="Filtrar invitaciones">
+      <button class="invite-filter-tab active" data-filter="available" onclick="setInviteFilter('available');">DISPONIBLES</button>
+      <button class="invite-filter-tab" data-filter="used" onclick="setInviteFilter('used');">USADOS / HISTORIAL</button>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table class="inv-table">
+        <thead>
+          <tr>
+            <th>CÓDIGO</th>
+            <th>ROL</th>
+            <th>ESTADO</th>
+            <th>CREADO</th>
+            <th>ACCIÓN</th>
+          </tr>
+        </thead>
+        <tbody id="invitesTableBody">
+          <tr><td colspan="5" style="text-align:center; color:var(--mut);">Cargando invitaciones...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="adminGroupsModal">
+  <div class="modal-box" style="max-width:700px; width:94%; max-height:85vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <h3 style="margin:0; font-family:var(--mono);">GRUPOS Y CUENTAS</h3>
+      <button class="btn btn-ghost btn-xs" onclick="closeAdminGroupsModal();">✕</button>
+    </div>
+    <div id="adminGroupsList"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="currentGroupModal">
+  <div class="modal-box" style="max-width:560px; width:92%;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h3 style="margin:0; font-family:var(--mono);">MI GRUPO</h3>
+      <button class="btn btn-ghost btn-xs" onclick="closeCurrentGroupModal();">✕</button>
+    </div>
+    <div id="currentGroupContent"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="uploadModal">
+  <div class="modal-box" style="max-width: 620px; width: 92%; max-height: 90vh; overflow-y: auto; background: #1A1714; border: 1px solid var(--line2); border-radius: 14px; padding: 24px; box-shadow: 0 25px 70px rgba(0,0,0,0.9);">
+    
+    <!-- Encabezado del Modal -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="font-size:16px; font-weight:900; color:var(--ink); margin:0;" id="uploadModalTitle">
+        <span style="display:flex;align-items:center;gap:8px;"><i data-lucide="cloud" style="width:20px;height:20px;color:var(--amber);"></i> Subir Canción a la Nube (Servidor)</span>
+      </h3>
+      <button id="closeModalBtn" style="background:none; border:none; color:var(--mut); cursor:pointer; padding:4px;"><i data-lucide="x" style="width:18px;height:18px;"></i></button>
+    </div>
+
+    <!-- Stepper Visual Moderno -->
+    <div class="wizard-stepper" style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid var(--line2);">
+      <div class="ws-step" id="wsStep1" style="display:flex; align-items:center; gap:6px;">
+        <span class="ws-badge" style="width:22px; height:22px; border-radius:50%; background:var(--amber); color:#000; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center;">1</span>
+        <span style="font-size:11px; font-weight:700; color:var(--ink);">Detalles</span>
+      </div>
+      <div style="width:24px; height:1px; background:var(--line2);" id="wsLine1"></div>
+      <div class="ws-step" id="wsStep2" style="display:flex; align-items:center; gap:6px; opacity:0.4;">
+        <span class="ws-badge" style="width:22px; height:22px; border-radius:50%; background:#1c2029; color:var(--mut); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center;">2</span>
+        <span style="font-size:11px; font-weight:700; color:var(--mut);">Archivo ZIP</span>
+      </div>
+      <div style="width:24px; height:1px; background:var(--line2);" id="wsLine2"></div>
+      <div class="ws-step" id="wsStep3" style="display:flex; align-items:center; gap:6px; opacity:0.4;">
+        <span class="ws-badge" style="width:22px; height:22px; border-radius:50%; background:#1c2029; color:var(--mut); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center;">3</span>
+        <span style="font-size:11px; font-weight:700; color:var(--mut);">Mapeo de Stems</span>
+      </div>
+    </div>
+    
+    <!-- Paso 1: Detalles & Portada -->
+    <div id="uploadStep1">
+      <div style="display:grid; grid-template-columns: 140px 1fr; gap:18px; margin-bottom:20px; align-items:start;">
+        
+        <!-- Portada Cuadrada con Dropzone y Preview Instantáneo (Sin botón examinar nativo) -->
+        <div>
+          <label style="display:block; font-size:10px; color:var(--mut); font-weight:700; letter-spacing:0.05em; margin-bottom:6px; font-family:var(--mono);">PORTADA</label>
+          <div id="coverDropZone" onclick="document.getElementById('upCover').click()" style="width:140px; height:140px; border-radius:10px; border:2px dashed var(--line2); background:#110F0D; cursor:pointer; position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:all 0.2s;">
+            <div id="coverPlaceholder" style="text-align:center; padding:10px;">
+              <i data-lucide="image-plus" style="width:28px; height:28px; color:var(--amber); margin-bottom:6px;"></i>
+              <span style="display:block; font-size:10px; font-weight:700; color:var(--ink2);">SUBIR IMAGEN</span>
+              <span style="display:block; font-size:8px; color:var(--dim); margin-top:2px;">JPG o PNG (máx. 2MB)</span>
+            </div>
+            <img id="coverPreviewImg" src="" style="display:none; width:100%; height:100%; object-fit:cover; position:absolute; inset:0;" alt="Portada">
+            <button type="button" id="btnRemoveCover" onclick="removeCoverPreview(event)" style="display:none; position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.8); border:1px solid rgba(255,255,255,0.25); color:white; font-size:10px; align-items:center; justify-content:center; cursor:pointer; z-index:10;" title="Quitar imagen"><i data-lucide="x" style="width:12px;height:12px;"></i></button>
+          </div>
+          <input type="file" id="upCover" accept="image/png, image/jpeg, image/webp" style="display:none;" onchange="handleCoverSelected(event)">
+        </div>
+
+        <!-- Campos de Información Esenciales -->
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label style="display:block; font-size:10px; color:var(--mut); font-weight:700; letter-spacing:0.05em; margin-bottom:5px; font-family:var(--mono);">TÍTULO DE LA CANCIÓN *</label>
+            <input type="text" id="upTitle" style="width:100%; padding:10px 12px; background:#110F0D; border:1px solid var(--line2); color:white; border-radius:6px; font-size:13px; font-weight:700;" placeholder="Ej. Danzaré, Tu Presencia...">
+          </div>
+
+          <div>
+            <label style="display:block; font-size:10px; color:var(--mut); font-weight:700; letter-spacing:0.05em; margin-bottom:5px; font-family:var(--mono);">ARTISTA O BANDA</label>
+            <input type="text" id="upArtist" style="width:100%; padding:10px 12px; background:#110F0D; border:1px solid var(--line2); color:white; border-radius:6px; font-size:13px;" placeholder="Ej. Averly Morillo, Montesanto...">
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div>
+              <label style="display:block; font-size:10px; color:var(--mut); font-weight:700; letter-spacing:0.05em; margin-bottom:5px; font-family:var(--mono);">TEMPO (BPM)</label>
+              <div style="display:flex; align-items:center; background:#110F0D; border:1px solid var(--line2); border-radius:6px; overflow:hidden;">
+                <button type="button" class="btn btn-ghost" style="padding:8px 10px; font-weight:900;" onclick="adjustUpBpm(-1)">-</button>
+                <input type="number" id="upBpm" value="120" step="1" style="width:100%; border:none; background:transparent; color:var(--amber); text-align:center; font-family:var(--mono); font-size:13px; font-weight:800; outline:none;">
+                <button type="button" class="btn btn-ghost" style="padding:8px 10px; font-weight:900;" onclick="adjustUpBpm(1)">+</button>
+              </div>
+            </div>
+
+            <div>
+              <label style="display:block; font-size:10px; color:var(--mut); font-weight:700; letter-spacing:0.05em; margin-bottom:5px; font-family:var(--mono);">TONALIDAD</label>
+              <select id="upKey" style="width:100%; padding:9px 10px; background:#110F0D; border:1px solid var(--line2); color:white; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer;">
+                <option value="C">C (Do)</option><option value="C#">C# / Db</option><option value="D">D (Re)</option><option value="Eb">Eb (Mi b)</option>
+                <option value="E">E (Mi)</option><option value="F">F (Fa)</option><option value="F#">F# / Gb</option><option value="G">G (Sol)</option>
+                <option value="G#">G# / Ab</option><option value="A">A (La)</option><option value="Bb">Bb (Si b)</option><option value="B">B (Si)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; border-top:1px solid var(--line2); padding-top:16px;">
+        <button type="button" class="btn btn-amber" onclick="goToUploadStep2()" style="padding:10px 20px; font-weight:800; display:flex; align-items:center; gap:8px;">
+          <span>SIGUIENTE: ARCHIVO ZIP</span> <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Paso 2: Archivo ZIP (Dropzone Moderno con Resplandor) -->
+    <div id="uploadStep2" style="display:none;">
+      <div class="modal-drop" id="modalDropZone" style="position:relative; cursor:pointer; border:2px dashed rgba(245,158,11,0.3); border-radius:12px; padding:36px 20px; text-align:center; background:#110F0D; transition:all 0.2s;" onclick="document.getElementById('zipFileInput').click()">
+        <div style="width:52px; height:52px; border-radius:50%; background:rgba(245,158,11,0.12); display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
+          <i data-lucide="folder-archive" style="width:28px;height:28px;color:var(--amber);"></i>
+        </div>
+        <h4 id="uploadStatusText" style="font-size:14px; font-weight:800; color:var(--ink); margin:0 0 6px;">Selecciona o arrastra tu archivo .ZIP de Stems</h4>
+        <p style="font-size:11px; color:var(--mut); margin:0 auto 12px; max-width:380px; line-height:1.4;">
+          El archivo debe contener las pistas de audio individuales (.mp3, .wav, .flac).
+        </p>
+        <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 12px; background:#221E19; border:1px solid var(--line2); border-radius:20px; font-size:10px; font-family:var(--mono); color:var(--amber);">
+          <i data-lucide="sparkles" style="width:12px;height:12px;"></i> MP3 intacto · WAV comprimido sin pérdida
+        </span>
+        <input type="file" id="zipFileInput" accept=".zip" style="display:none;" onchange="handleZipUpload(event)">
+        <div id="uploadProgress" style="display:none; width:100%; height:8px; background:#2C2620; margin-top:16px; border-radius:4px; overflow:hidden;">
+          <div id="uploadProgressBar" style="width:0%; height:100%; background:var(--amber); border-radius:4px; transition: width 0.3s;"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--line2); padding-top:16px; margin-top:18px;">
+        <button type="button" class="btn btn-ghost" onclick="goToUploadStep1()" id="btnBackStep1">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> ATRÁS
+        </button>
+        <button type="button" class="btn btn-amber" id="btnNextStep3" onclick="goToUploadStep3()" style="opacity:0.5; pointer-events:none; padding:10px 18px; font-weight:800;">
+          CONTINUAR AL MAPEO <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Paso 3: Mapeo de Stems -->
+    <div id="uploadStep3" style="display:none;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div>
+          <h4 style="font-size:13px; font-weight:800; color:var(--ink); margin:0;">Pistas detectadas en el ZIP</h4>
+          <p style="font-size:10px; color:var(--mut); margin:2px 0 0;">Asigna la categoría y el nombre que aparecerá en el fader de mezcla.</p>
+        </div>
+        <span class="badge" id="stemsFoundBadge" style="background:rgba(245,158,11,0.15); color:var(--amber); border:1px solid rgba(245,158,11,0.3); font-size:10px; font-family:var(--mono); padding:2px 8px; border-radius:4px;">0 STEMS</span>
+      </div>
+
+      <div id="mappingList" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:6px; margin-bottom:18px;">
+        <!-- Lista inyectada por JS -->
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--line2); padding-top:16px;">
+        <button type="button" class="btn btn-ghost" onclick="goToUploadStep2()">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> ATRÁS
+        </button>
+        <button type="button" class="btn btn-amber" onclick="finalizeUpload()" style="padding:10px 22px; font-weight:800;">
+          FINALIZAR Y ABRIR
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal Elección: Agregar Canción (Nube vs Local) -->
+<div class="modal-backdrop" id="addSongChoiceModal">
+  <div class="modal-box" style="max-width: 660px; width: 92%; max-height: 90vh; overflow-y: auto; background: #1A1714; border: 1px solid var(--line2); border-radius: 14px; padding: 24px; box-shadow: 0 25px 70px rgba(0,0,0,0.9);">
+    
+    <!-- Encabezado del Modal con botón cerrar -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
+      <div>
+        <h3 style="font-size:16px; font-weight:900; color:var(--ink); margin:0; display:flex; align-items:center; gap:8px;">
+          <i data-lucide="folder-plus" style="width:20px;height:20px;color:var(--amber);"></i>
+          <span id="addSongModalTitle">AGREGAR CANCIÓN AL SETLIST</span>
+        </h3>
+        <p style="font-size:11px; color:var(--mut); margin:4px 0 0; font-family:var(--mono);" id="addSongModalSubtitle">
+          Selecciona el origen de tus multitracks
+        </p>
+      </div>
+      <button id="closeAddChoiceBtn" style="background:none;border:none;color:var(--mut);cursor:pointer;padding:4px;border-radius:4px;" title="Cerrar ventana"><i data-lucide="x" style="width:18px;height:18px;"></i></button>
+    </div>
+
+    <!-- Pantalla 1: Selección Inicial (Nube vs Local) -->
+    <div id="choiceViewSelector" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:10px;">
+      <!-- Opción 1: NUBE -->
+      <div class="cloud-choice-card" onclick="openCloudCatalogView()">
+        <div style="width:48px; height:48px; border-radius:50%; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
+          <i data-lucide="cloud" style="width:24px; height:24px; color:var(--amber);"></i>
+        </div>
+        <h4 style="font-size:13px; font-weight:800; color:var(--ink); margin:0 0 6px; letter-spacing:0.02em;">CATÁLOGO EN LA NUBE</h4>
+        <p style="font-size:11px; color:var(--mut); margin:0 0 12px; line-height:1.4;">Explora y descarga canciones formateadas en tu servidor Debian (stems.tld-list.lat).</p>
+        <span style="display:inline-flex; align-items:center; gap:5px; font-size:10px; font-family:var(--mono); color:var(--amber); font-weight:700;">
+          EXPLORAR NUBE <i data-lucide="chevron-right" style="width:12px;height:12px;"></i>
+        </span>
+      </div>
+
+      <!-- Opción 2: LOCAL -->
+      <div class="cloud-choice-card local" onclick="openLocalUploadFlow()">
+        <div style="width:48px; height:48px; border-radius:50%; background:rgba(96,165,250,0.12); border:1px solid rgba(96,165,250,0.25); display:flex; align-items:center; justify-content:center; margin:0 auto 12px;">
+          <i data-lucide="hard-drive-upload" style="width:24px; height:24px; color:#60a5fa;"></i>
+        </div>
+        <h4 style="font-size:13px; font-weight:800; color:var(--ink); margin:0 0 6px; letter-spacing:0.02em;">ARCHIVO LOCAL</h4>
+        <p style="font-size:11px; color:var(--mut); margin:0 0 12px; line-height:1.4;">Carga un archivo .ZIP desde este dispositivo únicamente para uso local/offline.</p>
+        <span style="display:inline-flex; align-items:center; gap:5px; font-size:10px; font-family:var(--mono); color:#60a5fa; font-weight:700;">
+          CARGAR LOCAL <i data-lucide="chevron-right" style="width:12px;height:12px;"></i>
+        </span>
+      </div>
+    </div>
+
+    <!-- Pantalla 2: Explorador Moderno de Catálogo en la Nube con Buscador -->
+    <div id="choiceViewCloud" style="display:none; margin-top:8px;">
+      
+      <!-- Sub-barra superior: Volver + Estado del Servidor + Botón Refrescar -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line2);">
+        <button type="button" class="btn btn-ghost" style="padding:4px 10px; font-size:11px; display:inline-flex; align-items:center; gap:6px; font-weight:700;" onclick="backToChoiceSelector()">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Volver a opciones
+        </button>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:6px; background:#110F0D; border:1px solid var(--line2); padding:3px 9px; border-radius:20px; font-size:10px; font-family:var(--mono); color:var(--mut);">
+            <span class="server-status-dot" id="cloudServerStatusDot"></span>
+            <span id="cloudCatalogStatus">Conectando...</span>
+          </div>
+          <button type="button" class="btn btn-ghost" id="btnRefreshCloudCatalog" style="padding:4px; width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center;" onclick="refreshCloudCatalog()" title="Recargar catálogo">
+            <i data-lucide="rotate-cw" style="width:13px;height:13px;"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Buscador en Tiempo Real -->
+      <div class="cloud-search-wrapper">
+        <i data-lucide="search" style="width:16px;height:16px;color:var(--dim);flex-shrink:0;"></i>
+        <input type="text" id="cloudSearchInput" class="cloud-search-input" placeholder="Buscar por título, artista o tonalidad (ej. Danzaré, Averly, G)..." oninput="handleCloudSearchInput(this.value)">
+        <button type="button" class="cloud-search-clear" id="cloudSearchClearBtn" onclick="clearCloudSearch()" title="Limpiar búsqueda">
+          <i data-lucide="x" style="width:14px;height:14px;"></i>
+        </button>
+      </div>
+
+      <!-- Barra de resumen de resultados / canciones encontradas -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding:0 2px;">
+        <span style="font-size:10px; font-family:var(--mono); color:var(--dim);" id="cloudSearchSummary">
+          Cargando canciones...
+        </span>
+        <span style="font-size:10px; font-family:var(--mono); color:var(--mut);" id="cloudSearchCountBadge"></span>
+      </div>
+
+      <!-- Contenedor con Scroll de Canciones -->
+      <div id="cloudSongsList" style="max-height:330px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
+        <!-- Se inyecta dinámicamente con las tarjetas estilizadas -->
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal Selector & Creador de Setlists -->
+<div class="setlist-modal-backdrop" id="setlistModal" role="dialog" aria-modal="true" aria-labelledby="smcModalTitle">
+  <div class="setlist-modal-card">
+    <div class="smc-header" style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="smc-header-title" id="smcModalTitle">
+        <i data-lucide="layers"></i>
+        <span>MIS SETLISTS</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="btn btn-amber btn-sm" id="btnSaveSetlistModal" onclick="saveCurrentSetlist(event)" title="Guardar setlist en el servidor para todos los miembros" style="padding:6px 14px; font-weight:800; font-size:11px; display:inline-flex; align-items:center; gap:6px; border-radius:6px;">
+          <i data-lucide="save" style="width:13px;height:13px;"></i>
+          <span>GUARDAR</span>
+        </button>
+        <button type="button" class="smc-close-btn" id="closeSetlistModalBtn" aria-label="Cerrar ventana de setlists">✕</button>
+      </div>
+    </div>
+
+    <!-- Lista de Setlists disponibles -->
+    <div class="smc-list" id="setlistCardsContainer">
+      <!-- Renderizado dinámicamente con canciones y estado activo -->
+    </div>
+
+    <!-- Formulario para crear una nueva setlist -->
+    <div class="smc-create-box">
+      <span class="smc-create-label">CREAR NUEVA SETLIST</span>
+      <div class="smc-input-row">
+        <input type="text" class="smc-input" id="newSetlistInput" placeholder="Nombre de la nueva setlist (ej. Culto de Jóvenes)..." maxlength="32">
+        <button type="button" class="btn btn-amber smc-create-btn" id="btnCreateNewSetlist">
+          <i data-lucide="plus"></i><span>CREAR</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+  <!-- PANEL ARRANGER -->
+  <div id="arrangerPanel" class="arranger-dropdown">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="margin:0; font-size:11px; letter-spacing:0.1em; font-weight:700; color:var(--ink); display:flex; align-items:center; gap:8px;">
+        <i data-lucide="layout-template" style="width:14px;height:14px;color:var(--amber);"></i> ARRANGER
+      </h3>
+      <button class="btn btn-ghost" style="padding:4px; border-radius:50%; width:24px; height:24px; display:flex; align-items:center; justify-content:center;" onclick="toggleArranger()"><i data-lucide="x" style="width:14px;height:14px;"></i></button>
+    </div>
+    <p style="font-size:11px; color:var(--mut); margin-bottom:16px; line-height:1.4;">Arrastra una sección al timeline.</p>
+    
+    <div id="arrangerLabels" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:12px;">
+      <div class="arranger-label" draggable="true" data-name="INTRO" style="--c: var(--amber);">INTRO</div>
+      <div class="arranger-label" draggable="true" data-name="VERSO" style="--c: white;">VERSO</div>
+      <div class="arranger-label" draggable="true" data-name="PRECORO" style="--c: #F0B54E;">PRECORO</div>
+      <div class="arranger-label" draggable="true" data-name="CORO" style="--c: #E4604E;">CORO</div>
+      <div class="arranger-label" draggable="true" data-name="PUENTE" style="--c: #43B97C;">PUENTE</div>
+      <div class="arranger-label" draggable="true" data-name="FINAL" style="--c: #B89AE8;">FINAL</div>
+    </div>
+    
+    <div style="display:flex; gap:6px;">
+      <input type="text" id="arrangerCustomName" placeholder="Escribe..." class="ui-input" style="flex:1; font-size: 10px; padding: 6px;">
+      <div class="arranger-label" draggable="true" id="arrangerCustomBtn" data-name="OTRO" style="--c: #2FB8A5; flex: 0 0 50px; margin: 0; font-size: 8.5px; padding: 6px 4px;">OTRO</div>
+    </div>
+
+
+  </div>
+
+<dialog id="redundancyPanel" class="eq-panel" aria-labelledby="redundancyTitle">
+  <form method="dialog"><strong id="redundancyTitle">Ensayo A/B</strong><button aria-label="Cerrar">×</button></form>
+  <p>Carga la misma canción en ambos equipos. Crea la sala en el principal y escribe el código en el respaldo.</p>
+  <label>Código <input type="text" maxlength="8" autocomplete="off" autocapitalize="none"></label>
+  <button type="button" data-action="create">Crear sala</button>
+  <button type="button" data-action="join">Unirse</button>
+  <p role="status" aria-live="polite">Sin vincular.</p>
+  <button type="button" data-action="start" disabled>Iniciar ambos</button>
+  <label>Sección <select></select></label>
+  <button type="button" data-action="jump" disabled>Programar salto</button>
+  <button type="button" data-action="leave">Desvincular</button>
+</dialog>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

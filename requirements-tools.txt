@@ -1,0 +1,3 @@
+# Herramientas opcionales de desarrollo; no requeridas por el servidor.
+mcp>=1.0.0,<2
+openai>=1.0.0

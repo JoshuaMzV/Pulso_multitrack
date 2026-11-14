@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(pulso_android LANGUAGES CXX)
+find_package(oboe REQUIRED CONFIG)
+add_subdirectory(../../../../../engine pulso-engine)
+add_library(pulso_android SHARED native_show.cpp)
+target_compile_features(pulso_android PRIVATE cxx_std_20)
+target_link_libraries(pulso_android PRIVATE pulso_core oboe::oboe)

@@ -1,0 +1,54 @@
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #131110;
+    --panel: #1C1916;
+    --panel2: #171412;
+    --raise: #272219;
+    --raise-hover: #332C23;
+    --line: #2A241E;
+    --line2: #38312A;
+    --ink: #EDE7DD;
+    --ink2: #C4BDB3;
+    --mut: #9C948A;
+    --dim: #5C554B;
+    --amber: #E9A23B;
+    --amber2: #F0B54E;
+    --amber-glow: rgba(233, 162, 59, 0.4);
+    --red: #E4604E;
+    --green: #43B97C;
+    --blue: #3b82f6;
+    --purple: #a855f7;
+    --cyan: #2FB8A5;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+    --font-hero-song: 'Inter', system-ui, sans-serif;
+  }
+
+  /* ======== TEMA CLARO — Ensayos / Luz de día ======== */
+  [data-theme="light"] {
+    --bg: #F5F3EB;
+    --panel: #FCFAF3;
+    --panel2: #EEECE2;
+    --raise: #EDF0DF;
+    --raise-hover: #DFE8B7;
+    --line: #C9CEB8;
+    --line2: #9EA988;
+    --ink: #24372E;
+    --ink2: #4A5D52;
+    --mut: #4A5D52;
+    --dim: #526759;
+    --amber: #4B6227;
+    --amber2: #384C1C;
+    --control-green: #648032;
+    --control-green-hover: #708C3A;
+    --selection-green: #DCEAAE;
+    --selection-edge: #839B4D;
+    --amber-glow: rgba(104, 133, 48, 0.22);
+    --red: #C23B4A;
+    --green: #35604B;
+    --blue: #315F9A;
+    --purple: #76519B;
+    --cyan: #476023;
+  }
+

@@ -28,3 +28,26 @@ Thumbs.db
 *.log
 _pgbackup/
 _pginfo/
+
+# Salidas web y dependencias locales
+www/
+.venv/
+__pycache__/
+*.py[cod]
+.local-backups/
+data/
+.mycli/
+.mycli-fts/
+.env
+*.bak
+playwright-report/
+test-results/
+.test-data/
+src/vendor/fonts/
+src/vendor/fonts.css
+src/vendor/lucide.min.js
+src/vendor/lucide.LICENSE
+src/vendor/jszip.min.js
+src/vendor/jszip.LICENSE.md
+src/vendor/inter.LICENSE
+src/vendor/jetbrains-mono.LICENSE

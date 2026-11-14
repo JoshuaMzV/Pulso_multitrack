@@ -16,6 +16,9 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		F42000000000000000000001 /* NativeShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000001; };
+		F42000000000000000000002 /* pulso_engine.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000002; };
+		F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000003; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +33,9 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		F41000000000000000000001 /* NativeShowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NativeShowView.swift"; sourceTree = "<group>"; };
+		F41000000000000000000002 /* pulso_engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp; path = "../../../engine/src/pulso_engine.cpp"; sourceTree = "<group>"; };
+		F41000000000000000000003 /* pulso_mixer_simd.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp; path = "../../../engine/src/pulso_mixer_simd.cpp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +70,9 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F41000000000000000000001 /* NativeShowView.swift */,
+				F41000000000000000000002 /* pulso_engine.cpp */,
+				F41000000000000000000003 /* pulso_mixer_simd.cpp */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -159,6 +168,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				F42000000000000000000001 /* NativeShowView.swift in Sources */,
+				F42000000000000000000002 /* pulso_engine.cpp in Sources */,
+				F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -313,6 +325,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Pulso-Bridging-Header.h";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../engine/include";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -334,6 +349,9 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/Pulso-Bridging-Header.h";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../engine/include";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
