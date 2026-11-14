@@ -57,6 +57,8 @@ PULSO_API void pulso_destroy_engine(void* engine);
 
 // Carga PCM copiado al motor. Solo se llama con el dispositivo de salida detenido.
 PULSO_API bool pulso_load_stereo(void* engine, const float* left, const float* right, uint32_t frames);
+PULSO_API bool pulso_load_stem(void* engine, const float* left, const float* right,
+                              uint32_t frames, uint32_t index, bool cue);
 PULSO_API float pulso_position(void* engine);
 PULSO_API bool pulso_is_playing(void* engine);
 

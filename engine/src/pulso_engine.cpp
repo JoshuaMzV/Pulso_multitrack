@@ -71,14 +71,15 @@ public:
         }
     }
 
-    bool loadStereo(const float* left, const float* right, uint32_t frames) {
-        if (!left || !right || !frames) return false;
+    bool loadStereo(const float* left, const float* right, uint32_t frames, uint32_t index = 0, bool cue = false) {
+        if (!left || !right || !frames || index >= channels_.size()) return false;
         ChannelTrack track;
         track.audioData.assign(left, left + frames);
         track.rightData.assign(right, right + frames);
         track.targetGain = 1.0f;
-        channels_[0] = std::move(track);
-        durationFrames_ = frames;
+        track.bus = cue ? PULSO_BUS_CUE : PULSO_BUS_MASTER;
+        channels_[index] = std::move(track);
+        durationFrames_ = std::max(durationFrames_, static_cast<size_t>(frames));
         currentFrameIndex_ = 0;
         isPlaying_.store(false);
         clickEnabled_.store(false);
@@ -398,6 +399,13 @@ PULSO_API void pulso_destroy_engine(void* engine) {
 PULSO_API bool pulso_load_stereo(void* engine, const float* left, const float* right, uint32_t frames) {
     if (!engine) return false;
     try { return static_cast<PulsoAudio::EngineImpl*>(engine)->loadStereo(left, right, frames); }
+    catch (...) { return false; }
+}
+
+PULSO_API bool pulso_load_stem(void* engine, const float* left, const float* right,
+                              uint32_t frames, uint32_t index, bool cue) {
+    if (!engine) return false;
+    try { return static_cast<PulsoAudio::EngineImpl*>(engine)->loadStereo(left, right, frames, index, cue); }
     catch (...) { return false; }
 }
 

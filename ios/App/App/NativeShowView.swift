@@ -1,5 +1,5 @@
 import AVFoundation
-import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 private final class PulsoRender {
@@ -7,16 +7,16 @@ private final class PulsoRender {
     private let block = 512
     private let scratch: UnsafeMutablePointer<Float>
 
-    init?(rate: UInt32, buffer: AVAudioPCMBuffer) {
-        guard let channels = buffer.floatChannelData,
-              let engine = pulso_create_engine(rate, 512) else { return nil }
-        let right = buffer.format.channelCount == 2 ? channels[1] : channels[0]
-        guard pulso_load_stereo(engine, channels[0], right, buffer.frameLength) else {
-            pulso_destroy_engine(engine)
-            return nil
-        }
+    init?(rate: UInt32) {
+        guard let engine = pulso_create_engine(rate, 512) else { return nil }
         handle = engine
         scratch = .allocate(capacity: 512 * 4)
+    }
+
+    func add(_ pcm: AVAudioPCMBuffer, index: Int, cue: Bool) -> Bool {
+        guard let channels = pcm.floatChannelData else { return false }
+        let right = pcm.format.channelCount == 2 ? channels[1] : channels[0]
+        return pulso_load_stem(handle, channels[0], right, pcm.frameLength, UInt32(index), cue)
     }
 
     deinit {
@@ -47,178 +47,190 @@ private final class PulsoRender {
     }
 }
 
-@MainActor
-private final class NativeShowModel: ObservableObject {
-    @Published var title = "Abre una pista FLAC"
-    @Published var message: String?
-    @Published var loading = false
-    @Published var ready = false
-    @Published var master = 0.0
-    @Published private(set) var duration = 0.0
+
+final class NativeShowView: UIViewController, UIDocumentPickerDelegate {
     private var output: AVAudioEngine?
-    private var render: PulsoRender?
+    private var renderer: PulsoRender?
+    private var timer: Timer?
+    private let titleLabel = UILabel()
+    private let status = UILabel()
+    private let clock = UILabel()
+    private let master = UISlider()
+    private let open = UIButton(type: .system)
+    private let transport = UIStackView()
+    private let io = DispatchQueue(label: "com.pulso.library", qos: .userInitiated)
 
-    var position: Int { render.map { Int(pulso_position($0.handle)) } ?? 0 }
-    var playing: Bool { render.map { pulso_is_playing($0.handle) } ?? false }
+    private var library: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PulsoStems", isDirectory: true)
+    }
 
-    func load(_ url: URL) async {
-        loading = true
-        message = nil
-        defer { loading = false }
-        do {
-            let decoded = try await Task.detached(priority: .userInitiated) {
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
-                guard url.pathExtension.lowercased() == "flac", file.length > 0,
-                      file.length <= 24_000_000, (1...2).contains(file.processingFormat.channelCount),
-                      let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: UInt32(file.length)) else {
-                    throw CocoaError(.fileReadUnsupportedScheme)
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        titleLabel.text = "PULSO · SHOW"
+        titleLabel.font = .systemFont(ofSize: 32, weight: .black)
+        status.text = "Importa las pistas FLAC de una canción."
+        status.numberOfLines = 0
+        clock.font = .monospacedDigitSystemFont(ofSize: 30, weight: .bold)
+        clock.text = "0:00"
+        open.setTitle("Importar pistas FLAC", for: .normal)
+        open.addTarget(self, action: #selector(pick), for: .touchUpInside)
+        transport.spacing = 14
+        for (name, action) in [("Reproducir", #selector(play)), ("Pausa", #selector(pause)), ("Detener", #selector(stop))] {
+            let button = UIButton(type: .system)
+            button.setTitle(name, for: .normal)
+            button.addTarget(self, action: action, for: .touchUpInside)
+            transport.addArrangedSubview(button)
+        }
+        master.minimumValue = -60
+        master.maximumValue = 10
+        master.value = 0
+        master.accessibilityLabel = "Master"
+        master.addTarget(self, action: #selector(updateMaster), for: .valueChanged)
+        let masterLabel = UILabel()
+        masterLabel.text = "MASTER"
+        let footer = UIStackView(arrangedSubviews: [masterLabel, master])
+        footer.spacing = 12
+        let stack = UIStackView(arrangedSubviews: [titleLabel, open, status, clock, transport, footer])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        let safe = view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: safe.centerYAnchor),
+            stack.centerXAnchor.constraint(equalTo: safe.centerXAnchor),
+            stack.widthAnchor.constraint(equalTo: safe.widthAnchor, multiplier: 0.84),
+        ])
+        setReady(false)
+        let saved = (try? FileManager.default.contentsOfDirectory(at: library, includingPropertiesForKeys: nil)) ?? []
+        if !saved.isEmpty { load(saved.sorted { $0.lastPathComponent < $1.lastPathComponent }, importing: false) }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            guard let self, let renderer = self.renderer else { return }
+            let seconds = Int(pulso_position(renderer.handle))
+            self.clock.text = String(format: "%d:%02d", seconds / 60, seconds % 60)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(pause),
+            name: UIApplication.willResignActiveNotification, object: nil)
+    }
+
+    deinit { timer?.invalidate(); output?.stop() }
+
+    private func setReady(_ ready: Bool) {
+        transport.arrangedSubviews.compactMap { $0 as? UIButton }.forEach { $0.isEnabled = ready }
+        master.isEnabled = ready
+    }
+
+    @objc private func pick() {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType(filenameExtension: "flac") ?? .audio])
+        picker.allowsMultipleSelection = true
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        load(urls, importing: true)
+    }
+
+    @objc private func play() { if let renderer { pulso_play(renderer.handle) } }
+    @objc private func pause() { if let renderer { pulso_pause(renderer.handle) } }
+    @objc private func stop() { if let renderer { pulso_stop(renderer.handle) } }
+    @objc private func updateMaster() {
+        if let renderer { pulso_set_master_gain(renderer.handle, pow(10, master.value / 20)) }
+    }
+
+    private func load(_ urls: [URL], importing: Bool) {
+        guard !urls.isEmpty else { return }
+        pause()
+        open.isEnabled = false
+        setReady(false)
+        status.text = "Cargando pistas…"
+        let destination = library
+        io.async { [weak self] in
+            let result = Result { try Self.prepare(urls, destination: destination, importing: importing) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.open.isEnabled = true
+                do {
+                    let (render, rate) = try result.get()
+                    let session = AVAudioSession.sharedInstance()
+                    try session.setCategory(.playback)
+                    try session.setActive(true)
+                    let next = AVAudioEngine()
+                    guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    let source = AVAudioSourceNode(format: format) { _, _, frames, output in
+                        render.render(frames: Int(frames), output: output)
+                    }
+                    next.attach(source)
+                    next.connect(source, to: next.mainMixerNode, format: format)
+                    self.output?.stop()
+                    self.output = nil
+                    self.renderer = nil
+                    try next.start()
+                    self.output = next
+                    self.renderer = render
+                    self.updateMaster()
+                    self.setReady(true)
+                    self.status.text = "\(urls.count) pistas locales · listas para reproducir"
+                } catch {
+                    self.setReady(self.renderer != nil)
+                    self.status.text = error.localizedDescription
                 }
-                try file.read(into: pcm)
-                guard let render = PulsoRender(rate: UInt32(pcm.format.sampleRate), buffer: pcm),
-                      let format = AVAudioFormat(standardFormatWithSampleRate: pcm.format.sampleRate, channels: 2) else {
-                    throw CocoaError(.fileReadCorruptFile)
-                }
-                return (render, format, Double(pcm.frameLength) / pcm.format.sampleRate)
-            }.value
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback)
-            try session.setActive(true)
-            let next = AVAudioEngine()
-            let renderer = decoded.0
-            let source = AVAudioSourceNode(format: decoded.1) { _, _, frames, output in
-                renderer.render(frames: Int(frames), output: output)
             }
-            next.attach(source)
-            next.connect(source, to: next.mainMixerNode, format: decoded.1)
-            output?.stop()
-            ready = false
-            try next.start()
-            output = next
-            render = renderer
-            title = url.deletingPathExtension().lastPathComponent
-            duration = decoded.2
-            ready = true
-            updateMaster()
-        } catch {
-            message = "No se pudo abrir el FLAC o iniciar la salida de audio."
         }
     }
 
-    func play() { if ready, let render { pulso_play(render.handle) } }
-    func pause() { if let render { pulso_pause(render.handle) } }
-    func stop() { if let render { pulso_stop(render.handle) } }
-    func updateMaster() {
-        if let render { pulso_set_master_gain(render.handle, Float(pow(10.0, master / 20))) }
-    }
-}
+    private static func prepare(_ urls: [URL], destination: URL, importing: Bool) throws -> (PulsoRender, Double) {
+        func invalid(_ message: String) -> NSError {
+            NSError(domain: "PulsoLibrary", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        guard urls.count <= 64 else { throw invalid("Puedes importar hasta 64 pistas por canción.") }
+        let files = FileManager.default
+        let staging = destination.deletingLastPathComponent().appendingPathComponent(UUID().uuidString, isDirectory: true)
+        if importing { try files.createDirectory(at: staging, withIntermediateDirectories: true) }
+        defer { if importing { try? files.removeItem(at: staging) } }
 
-@MainActor
-struct NativeShowView: View {
-    @StateObject private var player = NativeShowModel()
-    @State private var picking = false
-    @Environment(\.scenePhase) private var phase
-    @Environment(\.colorScheme) private var scheme
-
-    private var light: Bool { scheme == .light }
-    private var accent: Color { light ? Color(red: 0.31, green: 0.42, blue: 0.14) : Color(red: 1, green: 0.68, blue: 0.26) }
-    private var surface: Color { light ? Color(red: 0.98, green: 0.97, blue: 0.93) : Color(white: 0.12) }
-    private var canvas: Color { light ? Color(red: 0.94, green: 0.93, blue: 0.89) : Color(white: 0.07) }
-
-    private func clock(_ seconds: Int) -> String {
-        String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
-            let elapsed = player.position
-            VStack(spacing: 14) {
-                HStack(spacing: 8) {
-                    Button {
-                        if player.playing { player.pause() } else { player.play() }
-                    } label: {
-                        Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                            .frame(minWidth: 22, minHeight: 28)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    .foregroundColor(light ? .white : .black)
-                    .accessibilityLabel(player.playing ? "Pausa" : "Reproducir")
-                    .disabled(!player.ready || player.loading)
-                    Button(action: player.stop) {
-                        Image(systemName: "stop").frame(minWidth: 22, minHeight: 28)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Detener")
-                    .disabled(!player.ready || player.loading)
-                    Text(clock(elapsed)).font(.system(.body, design: .monospaced))
-                    Spacer()
-                    Label("SHOW", systemImage: "bolt.fill")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(accent.opacity(0.18), in: Capsule())
-                }
-                .padding(10)
-                .background(surface, in: RoundedRectangle(cornerRadius: 14))
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(player.ready ? player.title.uppercased() : "PULSO")
-                        .font(.system(.largeTitle, design: .default).weight(.black))
-                        .lineLimit(2)
-                    Text(player.ready ? "PISTA LOCAL" : "Selecciona un FLAC para reproducir")
-                        .font(.subheadline).foregroundColor(.secondary)
-                    Spacer(minLength: 8)
-                    HStack(alignment: .bottom) {
-                        Button { picking = true } label: {
-                            Label(player.loading ? "Cargando…" : "Abrir FLAC", systemImage: "folder")
-                        }
-                        .buttonStyle(.bordered).disabled(player.loading)
-                        Spacer()
-                        if player.ready {
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(clock(max(0, Int(ceil(player.duration)) - elapsed)))
-                                    .font(.system(.largeTitle, design: .monospaced).bold())
-                                    .foregroundColor(accent)
-                                Text("RESTANTE").font(.caption.bold()).foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    if let message = player.message { Text(message).foregroundColor(.red) }
-                    if player.duration > 0 {
-                        ProgressView(value: min(Double(elapsed), player.duration), total: player.duration)
-                            .tint(accent)
-                    }
-                }
-                .padding(22)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(LinearGradient(colors: [accent.opacity(0.16), surface, surface],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-                .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(accent.opacity(0.25)) }
-
-                HStack(spacing: 14) {
-                    Text("MASTER").font(.caption.bold()).tracking(1)
-                    Slider(value: $player.master, in: -60...10)
-                        .accessibilityLabel("Master")
-                        .disabled(!player.ready)
-                        .onChange(of: player.master) { _ in player.updateMaster() }
-                    Text(String(format: "%.1f dB", player.master))
-                        .font(.system(.caption, design: .monospaced))
-                }
-                .padding(12)
-                .background(surface, in: RoundedRectangle(cornerRadius: 14))
+        var render: PulsoRender?
+        var rate = 0.0
+        var totalFrames: Int64 = 0
+        for (index, url) in urls.enumerated() {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard url.pathExtension.lowercased() == "flac" else { throw invalid("Selecciona archivos FLAC.") }
+            let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let format = file.processingFormat
+            guard file.length > 0, file.length <= 24_000_000, (1...2).contains(format.channelCount) else {
+                throw invalid("Usa pistas FLAC mono o estéreo dentro del límite de memoria.")
             }
-            .padding(16)
-            .frame(maxWidth: 1100)
+            totalFrames += file.length
+            guard totalFrames <= 40_000_000 else { throw invalid("Esta canción supera el límite de memoria de esta versión.") }
+            if render == nil {
+                rate = format.sampleRate
+                render = PulsoRender(rate: UInt32(rate))
+            }
+            guard format.sampleRate == rate else { throw invalid("Todas las pistas deben tener la misma frecuencia de muestreo.") }
+            guard let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(file.length)) else {
+                throw invalid("No se pudo reservar memoria para la pista.")
+            }
+            try file.read(into: pcm)
+            let name = url.lastPathComponent.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            let cue = ["click", "guide", "guia", "metron"].contains { name.contains($0) }
+            guard render?.add(pcm, index: index, cue: cue) == true else { throw invalid("No se pudo cargar una pista.") }
+            if importing {
+                try files.copyItem(at: url, to: staging.appendingPathComponent("\(index)-\(url.lastPathComponent)"))
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(canvas.ignoresSafeArea())
-        .onChange(of: phase) { if $0 != .active { player.pause() } }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "flac") ?? .audio]) {
-            if case .success(let url) = $0 { Task { await player.load(url) } }
+        guard let render else { throw invalid("No se encontró audio.") }
+        if importing {
+            if files.fileExists(atPath: destination.path) {
+                _ = try files.replaceItemAt(destination, withItemAt: staging)
+            } else {
+                try files.moveItem(at: staging, to: destination)
+            }
         }
+        return (render, rate)
     }
 }
