@@ -17,21 +17,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22 LTS
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Sync Capacitor iOS
-        run: npm run build && npx cap sync ios
-
       - name: Build iOS App Archive
         working-directory: ios/App
         run: |
+          set -o pipefail
           xcodebuild -project App.xcodeproj \
             -scheme App \
             -configuration Release \
@@ -39,7 +28,14 @@ jobs:
             -archivePath build/App.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            archive
+            archive 2>&1 | tee "$RUNNER_TEMP/pulso-xcode.log"
+
+      - name: Upload Xcode log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PULSO-Xcode-log
+          path: ${{ runner.temp }}/pulso-xcode.log
 
       - name: Package Payload into IPA
         run: |
