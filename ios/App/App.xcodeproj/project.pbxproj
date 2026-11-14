@@ -290,6 +290,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "App/Pulso-Bridging-Header.h";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../engine/include";
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				OTHER_LDFLAGS = "$(inherited) -lc++";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -314,6 +315,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "App/Pulso-Bridging-Header.h";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../../engine/include";
 				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				OTHER_LDFLAGS = "$(inherited) -lc++";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
