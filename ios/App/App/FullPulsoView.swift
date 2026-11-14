@@ -1,19 +1,39 @@
-import SwiftUI
+import UIKit
 import WebKit
 
-@MainActor
-struct FullPulsoView: View {
-    @AppStorage("pulso.server.url") private var server = ""
-    @State private var address = ""
-    @State private var configuring = false
+final class FullPulsoView: UIViewController, WKNavigationDelegate {
+    private let storageKey = "pulso.server.url"
+    private let browser: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        return WKWebView(frame: .zero, configuration: configuration)
+    }()
 
-    private var validatedAddress: URL? {
-        Self.serverURL(address)
+    override func loadView() { view = browser }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        browser.navigationDelegate = self
+        browser.allowsBackForwardNavigationGestures = true
+        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(openSettings(_:)))
+        gesture.numberOfTouchesRequired = 3
+        gesture.cancelsTouchesInView = false
+        browser.addGestureRecognizer(gesture)
     }
 
-    private static func serverURL(_ value: String) -> URL? {
-        let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = input.contains("://") ? input : "https://" + input
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard browser.url == nil, !browser.isLoading else { return }
+        if let saved = UserDefaults.standard.string(forKey: storageKey), let url = serverURL(saved) {
+            browser.load(URLRequest(url: url))
+        } else {
+            connectionForm()
+        }
+    }
+
+    private func serverURL(_ input: String) -> URL? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = value.contains("://") ? value : "https://" + value
         guard let parts = URLComponents(string: text),
               parts.scheme?.lowercased() == "https",
               let host = parts.host, !host.isEmpty,
@@ -22,85 +42,38 @@ struct FullPulsoView: View {
         return parts.url
     }
 
-    var body: some View {
-        if let url = Self.serverURL(server) {
-            PulsoWebView(url: url, configure: openSettings)
-                .id(url)
-                .sheet(isPresented: $configuring) { connectionForm }
-        } else {
-            connectionForm
+    @objc private func openSettings(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began { connectionForm() }
+    }
+
+    private func connectionForm(message: String = "Introduce la dirección HTTPS de tu servidor PULSO.") {
+        guard presentedViewController == nil else { return }
+        let prompt = UIAlertController(title: "PULSO", message: message, preferredStyle: .alert)
+        prompt.addTextField {
+            $0.placeholder = "https://servidor.example"
+            $0.text = UserDefaults.standard.string(forKey: self.storageKey)
+            $0.keyboardType = .URL
+            $0.autocapitalizationType = .none
+            $0.autocorrectionType = .no
         }
-    }
-
-    private func openSettings() {
-        address = server
-        configuring = true
-    }
-
-    private var connectionForm: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("PULSO").font(.largeTitle.bold())
-            Text("Introduce la dirección HTTPS de tu servidor PULSO.")
-            TextField("https://servidor.example", text: $address)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button("Abrir PULSO") {
-                guard let url = validatedAddress else { return }
-                server = url.absoluteString
-                configuring = false
+        prompt.addAction(UIAlertAction(title: "Abrir PULSO", style: .default) { [weak self, weak prompt] _ in
+            guard let self else { return }
+            guard let input = prompt?.textFields?.first?.text, let url = self.serverURL(input) else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    self.connectionForm(message: "Introduce una dirección HTTPS válida.")
+                }
+                return
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(validatedAddress == nil)
-            if configuring {
-                Button("Cancelar") { configuring = false }
-            }
-        }
-        .padding(24)
-        .frame(maxWidth: 540)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct PulsoWebView: UIViewRepresentable {
-    let url: URL
-    let configure: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(url: url, configure: configure) }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        let view = WKWebView(frame: .zero, configuration: config)
-        view.navigationDelegate = context.coordinator
-        view.allowsBackForwardNavigationGestures = true
-        let gesture = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.settings(_:)))
-        gesture.numberOfTouchesRequired = 3
-        gesture.cancelsTouchesInView = false
-        view.addGestureRecognizer(gesture)
-        view.load(URLRequest(url: url))
-        return view
+            UserDefaults.standard.set(url.absoluteString, forKey: self.storageKey)
+            self.browser.load(URLRequest(url: url))
+        })
+        if browser.url != nil { prompt.addAction(UIAlertAction(title: "Cancelar", style: .cancel)) }
+        present(prompt, animated: true)
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {}
-
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        let url: URL
-        let configure: () -> Void
-
-        init(url: URL, configure: @escaping () -> Void) {
-            self.url = url
-            self.configure = configure
-        }
-
-        @objc func settings(_ gesture: UILongPressGestureRecognizer) {
-            if gesture.state == .began { configure() }
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            guard (error as NSError).code != NSURLErrorCancelled else { return }
-            configure()
-        }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let failure = error as NSError
+        guard failure.domain != NSURLErrorDomain || failure.code != NSURLErrorCancelled else { return }
+        connectionForm(message: "No se pudo abrir PULSO. Comprueba la dirección y que el iPad pueda llegar al servidor.")
     }
 }
