@@ -25,8 +25,8 @@
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		F41000000000000000000001 /* NativeShowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NativeShowView.swift"; sourceTree = "<group>"; };
-		F41000000000000000000002 /* pulso_engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp; path = "../../../engine/src/pulso_engine.cpp"; sourceTree = "<group>"; };
-		F41000000000000000000003 /* pulso_mixer_simd.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp; path = "../../../engine/src/pulso_mixer_simd.cpp"; sourceTree = "<group>"; };
+		F41000000000000000000002 /* pulso_engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../../../engine/src/pulso_engine.cpp"; sourceTree = "<group>"; };
+		F41000000000000000000003 /* pulso_mixer_simd.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../../../engine/src/pulso_mixer_simd.cpp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
