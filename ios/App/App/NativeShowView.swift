@@ -183,7 +183,7 @@ final class NativeShowView: UIViewController, UIDocumentPickerDelegate {
         }
     }
 
-    private static func prepare(_ urls: [URL], destination: URL, importing: Bool) throws -> (PulsoRender, Double) {
+    private nonisolated static func prepare(_ urls: [URL], destination: URL, importing: Bool) throws -> (PulsoRender, Double) {
         func invalid(_ message: String) -> NSError {
             NSError(domain: "PulsoLibrary", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
