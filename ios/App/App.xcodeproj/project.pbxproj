@@ -12,6 +12,7 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		F42000000000000000000001 /* NativeShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000001; };
+		F42000000000000000000004 /* FullPulsoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000004; };
 		F42000000000000000000002 /* pulso_engine.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000002; };
 		F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000003; };
 /* End PBXBuildFile section */
@@ -25,6 +26,7 @@
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		F41000000000000000000001 /* NativeShowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NativeShowView.swift"; sourceTree = "<group>"; };
+		F41000000000000000000004 /* FullPulsoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FullPulsoView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000002 /* pulso_engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../../../engine/src/pulso_engine.cpp"; sourceTree = "<group>"; };
 		F41000000000000000000003 /* pulso_mixer_simd.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "../../../engine/src/pulso_mixer_simd.cpp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -61,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				F41000000000000000000001 /* NativeShowView.swift */,
+				F41000000000000000000004 /* FullPulsoView.swift */,
 				F41000000000000000000002 /* pulso_engine.cpp */,
 				F41000000000000000000003 /* pulso_mixer_simd.cpp */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
@@ -149,6 +152,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				F42000000000000000000001 /* NativeShowView.swift in Sources */,
+				F42000000000000000000004 /* FullPulsoView.swift in Sources */,
 				F42000000000000000000002 /* pulso_engine.cpp in Sources */,
 				F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
