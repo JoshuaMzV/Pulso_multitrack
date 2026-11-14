@@ -54,10 +54,12 @@ private final class NativeShowModel: ObservableObject {
     @Published var loading = false
     @Published var ready = false
     @Published var master = 0.0
+    @Published private(set) var duration = 0.0
     private var output: AVAudioEngine?
     private var render: PulsoRender?
 
     var position: Int { render.map { Int(pulso_position($0.handle)) } ?? 0 }
+    var playing: Bool { render.map { pulso_is_playing($0.handle) } ?? false }
 
     func load(_ url: URL) async {
         loading = true
@@ -78,7 +80,7 @@ private final class NativeShowModel: ObservableObject {
                       let format = AVAudioFormat(standardFormatWithSampleRate: pcm.format.sampleRate, channels: 2) else {
                     throw CocoaError(.fileReadCorruptFile)
                 }
-                return (render, format)
+                return (render, format, Double(pcm.frameLength) / pcm.format.sampleRate)
             }.value
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback)
@@ -95,7 +97,8 @@ private final class NativeShowModel: ObservableObject {
             try next.start()
             output = next
             render = renderer
-            title = url.lastPathComponent
+            title = url.deletingPathExtension().lastPathComponent
+            duration = decoded.2
             ready = true
             updateMaster()
         } catch {
@@ -116,32 +119,103 @@ struct NativeShowView: View {
     @StateObject private var player = NativeShowModel()
     @State private var picking = false
     @Environment(\.scenePhase) private var phase
+    @Environment(\.colorScheme) private var scheme
+
+    private var light: Bool { scheme == .light }
+    private var accent: Color { light ? Color(red: 0.31, green: 0.42, blue: 0.14) : Color(red: 1, green: 0.68, blue: 0.26) }
+    private var surface: Color { light ? Color(red: 0.98, green: 0.97, blue: 0.93) : Color(white: 0.12) }
+    private var canvas: Color { light ? Color(red: 0.94, green: 0.93, blue: 0.89) : Color(white: 0.07) }
+
+    private func clock(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("PULSO · Show").font(.largeTitle.bold())
-            Text(player.title)
-            Button(player.loading ? "Cargando…" : "Abrir FLAC") { picking = true }
-                .disabled(player.loading)
-            if let message = player.message { Text(message).foregroundColor(.red) }
-            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
-                Text(String(format: "%d:%02d", player.position / 60, player.position % 60))
-                    .monospacedDigit()
+        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            let elapsed = player.position
+            VStack(spacing: 14) {
+                HStack(spacing: 8) {
+                    Button {
+                        if player.playing { player.pause() } else { player.play() }
+                    } label: {
+                        Image(systemName: player.playing ? "pause.fill" : "play.fill")
+                            .frame(minWidth: 22, minHeight: 28)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .foregroundColor(light ? .white : .black)
+                    .accessibilityLabel(player.playing ? "Pausa" : "Reproducir")
+                    .disabled(!player.ready || player.loading)
+                    Button(action: player.stop) {
+                        Image(systemName: "stop").frame(minWidth: 22, minHeight: 28)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Detener")
+                    .disabled(!player.ready || player.loading)
+                    Text(clock(elapsed)).font(.system(.body, design: .monospaced))
+                    Spacer()
+                    Label("SHOW", systemImage: "bolt.fill")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(accent.opacity(0.18), in: Capsule())
+                }
+                .padding(10)
+                .background(surface, in: RoundedRectangle(cornerRadius: 14))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(player.ready ? player.title.uppercased() : "PULSO")
+                        .font(.system(.largeTitle, design: .default).weight(.black))
+                        .lineLimit(2)
+                    Text(player.ready ? "PISTA LOCAL" : "Selecciona un FLAC para reproducir")
+                        .font(.subheadline).foregroundColor(.secondary)
+                    Spacer(minLength: 8)
+                    HStack(alignment: .bottom) {
+                        Button { picking = true } label: {
+                            Label(player.loading ? "Cargando…" : "Abrir FLAC", systemImage: "folder")
+                        }
+                        .buttonStyle(.bordered).disabled(player.loading)
+                        Spacer()
+                        if player.ready {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(clock(max(0, Int(ceil(player.duration)) - elapsed)))
+                                    .font(.system(.largeTitle, design: .monospaced).bold())
+                                    .foregroundColor(accent)
+                                Text("RESTANTE").font(.caption.bold()).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    if let message = player.message { Text(message).foregroundColor(.red) }
+                    if player.duration > 0 {
+                        ProgressView(value: min(Double(elapsed), player.duration), total: player.duration)
+                            .tint(accent)
+                    }
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(LinearGradient(colors: [accent.opacity(0.16), surface, surface],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+                .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(accent.opacity(0.25)) }
+
+                HStack(spacing: 14) {
+                    Text("MASTER").font(.caption.bold()).tracking(1)
+                    Slider(value: $player.master, in: -60...10)
+                        .accessibilityLabel("Master")
+                        .disabled(!player.ready)
+                        .onChange(of: player.master) { _ in player.updateMaster() }
+                    Text(String(format: "%.1f dB", player.master))
+                        .font(.system(.caption, design: .monospaced))
+                }
+                .padding(12)
+                .background(surface, in: RoundedRectangle(cornerRadius: 14))
             }
-            HStack {
-                Button("Reproducir", action: player.play)
-                Button("Pausa", action: player.pause)
-                Button("Detener", action: player.stop)
-            }.buttonStyle(.bordered).disabled(!player.ready || player.loading)
-            Text(String(format: "Master %.1f dB", player.master))
-            Slider(value: $player.master, in: -60...10)
-                .accessibilityLabel("Master")
-                .disabled(!player.ready)
-                .onChange(of: player.master) { _ in player.updateMaster() }
+            .padding(16)
+            .frame(maxWidth: 1100)
         }
-        .padding()
-        .frame(maxWidth: 540)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(canvas.ignoresSafeArea())
         .onChange(of: phase) { if $0 != .active { player.pause() } }
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "flac") ?? .audio]) {
             if case .success(let url) = $0 { Task { await player.load(url) } }
