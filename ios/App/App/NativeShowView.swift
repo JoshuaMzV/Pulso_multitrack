@@ -422,7 +422,7 @@ final class PulsoAudioController: ObservableObject {
         return PreparedSession(renderer: renderInstance, rate: sampleRate, channels: channelItems, maxFrames: longestTrackFrames)
     }
 
-    private static func cleanStemName(_ filename: String) -> String {
+    private nonisolated static func cleanStemName(_ filename: String) -> String {
         var name = (filename as NSString).deletingPathExtension
         if let idx = name.firstIndex(of: "-") {
             let prefix = name[..<idx]
