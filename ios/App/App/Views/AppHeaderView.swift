@@ -50,7 +50,8 @@ struct AppHeaderView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .frame(minWidth: 80, height: 33)
+                .frame(minWidth: 80)
+                .frame(height: 33)
                 .background(PulsoTheme.blackBox)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
@@ -78,7 +79,8 @@ struct AppHeaderView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .frame(minWidth: 86, height: 33)
+                .frame(minWidth: 86)
+                .frame(height: 33)
                 .background(PulsoTheme.blackBox)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)

@@ -56,7 +56,7 @@ extension Color {
     }
 
     init(hexString: String) {
-        var clean = hexString.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        let clean = hexString.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
         if clean.count == 6 {
             var val: UInt64 = 0
             Scanner(string: clean).scanHexInt64(&val)
