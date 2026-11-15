@@ -91,45 +91,66 @@ struct AppHeaderView: View {
 
             Spacer()
 
-            // View Hub (.view-hub)
-            HStack(spacing: 2) {
-                // EDICIÓN
-                Button(action: { vm.mode = .edition }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11))
-                        Text("EDICIÓN")
-                            .font(.system(size: 11, weight: .heavy))
+            if vm.mode == .show {
+                // Center Dots in Show Mode (.hdr-more-btn)
+                Button(action: {
+                    // Toggle between Stage (Image 1) and Mixer (Image 2)
+                    vm.toggleShowMixer()
+                }) {
+                    HStack(spacing: 4) {
+                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
+                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
+                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
                     }
-                    .foregroundColor(vm.mode == .edition ? PulsoTheme.amber : PulsoTheme.mut)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(vm.mode == .edition ? PulsoTheme.panel : Color.clear)
+                    .frame(height: 30)
+                    .background(PulsoTheme.panel)
                     .cornerRadius(6)
                 }
 
-                // SHOW
-                Button(action: { vm.mode = .show }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 11))
-                        Text("SHOW")
-                            .font(.system(size: 11, weight: .heavy))
+                Spacer()
+
+                // View Hub on the Right
+                viewHub
+            } else {
+                // View Hub in the Center for Edition Mode
+                viewHub
+
+                Spacer()
+
+                // Right Action Buttons for Edition Mode (.hdr-edition-actions)
+                HStack(spacing: 8) {
+                    // A/B Button
+                    Button(action: {}) {
+                        Text("A/B")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(PulsoTheme.textDim)
+                            .frame(width: 42, height: 32)
+                            .background(PulsoTheme.panel)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(PulsoTheme.line2, lineWidth: 1)
+                            )
+                            .cornerRadius(6)
                     }
-                    .foregroundColor(vm.mode == .show ? PulsoTheme.amber : PulsoTheme.mut)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(vm.mode == .show ? PulsoTheme.panel : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(vm.mode == .show ? PulsoTheme.line2 : Color.clear, lineWidth: 1)
-                    )
-                    .cornerRadius(6)
+
+                    // + Subir Canción Button (.btn-amber)
+                    Button(action: {}) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "icloud.and.arrow.up.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("+ SUBIR CANCIÓN")
+                                .font(.system(size: 11, weight: .heavy))
+                        }
+                        .foregroundColor(Color(hex: 0x060709))
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(PulsoTheme.amber)
+                        .shadow(color: PulsoTheme.amberGlow, radius: 4, x: 0, y: 0)
+                        .cornerRadius(6)
+                    }
                 }
             }
-            .padding(2)
-            .background(PulsoTheme.raise)
-            .cornerRadius(8)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -141,6 +162,47 @@ struct AppHeaderView: View {
                 .foregroundColor(PulsoTheme.line),
             alignment: .bottom
         )
+    }
+
+    private var viewHub: some View {
+        HStack(spacing: 2) {
+            // EDICIÓN
+            Button(action: { vm.mode = .edition }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 11))
+                    Text("EDICIÓN")
+                        .font(.system(size: 11, weight: .heavy))
+                }
+                .foregroundColor(vm.mode == .edition ? (Color(hex: 0x060709)) : PulsoTheme.mut)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(vm.mode == .edition ? PulsoTheme.amber : Color.clear)
+                .cornerRadius(6)
+            }
+
+            // SHOW
+            Button(action: { vm.mode = .show }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11))
+                    Text("SHOW")
+                        .font(.system(size: 11, weight: .heavy))
+                }
+                .foregroundColor(vm.mode == .show ? (vm.mode == .edition ? PulsoTheme.mut : PulsoTheme.amber) : PulsoTheme.mut)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(vm.mode == .show ? PulsoTheme.panel : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(vm.mode == .show ? PulsoTheme.line2 : Color.clear, lineWidth: 1)
+                )
+                .cornerRadius(6)
+            }
+        }
+        .padding(2)
+        .background(PulsoTheme.raise)
+        .cornerRadius(8)
     }
 
     private func formatTime(_ sec: Double) -> String {

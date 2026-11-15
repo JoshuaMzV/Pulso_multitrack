@@ -6,10 +6,16 @@ enum PulsoViewMode {
     case edition
 }
 
+enum ShowSubmode {
+    case stage // Modern hero & arranger (Image 1)
+    case mixer // Stems mixer console (Image 2)
+}
+
 @MainActor
 final class ShowViewModel: ObservableObject {
     // Mode
     @Published var mode: PulsoViewMode = .show
+    @Published var showSubmode: ShowSubmode = .stage
 
     // Setlist & Song
     @Published var setlist: SetlistItem = MockSongData.defaultSetlist
@@ -31,12 +37,17 @@ final class ShowViewModel: ObservableObject {
 
     // Stems for active song
     @Published var stems: [StemItem] = []
+    @Published var selectedTrackId: String = "guide"
 
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
 
     init() {
         self.loadSong(MockSongData.song1)
+    }
+
+    func selectTrack(id: String) {
+        selectedTrackId = id
     }
 
     func loadSong(_ song: SongItem) {
@@ -105,6 +116,10 @@ final class ShowViewModel: ObservableObject {
 
     func toggleLoop() {
         loopSection.toggle()
+    }
+
+    func toggleShowMixer() {
+        showSubmode = (showSubmode == .stage) ? .mixer : .stage
     }
 
     func setSongKey(_ newKey: String) {

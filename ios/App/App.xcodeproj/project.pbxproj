@@ -21,6 +21,8 @@
 		F42000000000000000000014 /* AppHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000014; };
 		F42000000000000000000015 /* ModernShowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000015; };
 		F42000000000000000000016 /* StemsMixerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000016; };
+		F42000000000000000000017 /* EditionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000017; };
+		F42000000000000000000018 /* LocalDatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000018; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +43,8 @@
 		F41000000000000000000014 /* AppHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/AppHeaderView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000015 /* ModernShowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ModernShowView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000016 /* StemsMixerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/StemsMixerView.swift"; sourceTree = "<group>"; };
+		F41000000000000000000017 /* EditionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/EditionView.swift"; sourceTree = "<group>"; };
+		F41000000000000000000018 /* LocalDatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/LocalDatabaseService.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +85,8 @@
 				F41000000000000000000014 /* AppHeaderView.swift */,
 				F41000000000000000000015 /* ModernShowView.swift */,
 				F41000000000000000000016 /* StemsMixerView.swift */,
+				F41000000000000000000017 /* EditionView.swift */,
+				F41000000000000000000018 /* LocalDatabaseService.swift */,
 				F41000000000000000000004 /* FullPulsoView.swift */,
 				F41000000000000000000002 /* pulso_engine.cpp */,
 				F41000000000000000000003 /* pulso_mixer_simd.cpp */,
@@ -176,6 +182,8 @@
 				F42000000000000000000014 /* AppHeaderView.swift in Sources */,
 				F42000000000000000000015 /* ModernShowView.swift in Sources */,
 				F42000000000000000000016 /* StemsMixerView.swift in Sources */,
+				F42000000000000000000017 /* EditionView.swift in Sources */,
+				F42000000000000000000018 /* LocalDatabaseService.swift in Sources */,
 				F42000000000000000000002 /* pulso_engine.cpp in Sources */,
 				F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,

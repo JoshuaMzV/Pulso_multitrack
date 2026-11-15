@@ -12,9 +12,13 @@ struct PulsoRootView: View {
 
             // Content View (SHOW or EDICIÓN)
             if vm.mode == .show {
-                ModernShowView(vm: vm)
+                if vm.showSubmode == .stage {
+                    ModernShowView(vm: vm)
+                } else {
+                    StemsMixerView(vm: vm)
+                }
             } else {
-                StemsMixerView(vm: vm)
+                EditionView(vm: vm)
             }
         }
         .background(PulsoTheme.bg.ignoresSafeArea())
