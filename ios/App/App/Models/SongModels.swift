@@ -27,6 +27,28 @@ struct StemItem: Identifiable, Hashable {
     }
 }
 
+enum TransitionMode: String, CaseIterable, Hashable {
+    case stop = "stop" // Con pausa
+    case instant = "instant" // Al terminar
+    case overlap = "overlap" // Traslape con fundido
+
+    var icon: String {
+        switch self {
+        case .stop: return "⤓"
+        case .instant: return "↴"
+        case .overlap: return "⇄"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .stop: return "Con pausa"
+        case .instant: return "Al terminar"
+        case .overlap: return "Traslape con fundido"
+        }
+    }
+}
+
 struct SongItem: Identifiable, Hashable {
     let id: String
     var title: String
@@ -38,6 +60,7 @@ struct SongItem: Identifiable, Hashable {
     var stems: [StemItem]
     var sections: [SectionItem]
     var coverUrl: String?
+    var transition: TransitionMode = .stop
 }
 
 struct SetlistItem: Identifiable {

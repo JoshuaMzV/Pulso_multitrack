@@ -36,6 +36,13 @@ final class ShowViewModel: ObservableObject {
     @Published var currentUser: UserProfile = .default
     @Published var isLoggedIn: Bool = true
     @Published var showingAuthModal: Bool = false
+    @Published var showingUserDropdown: Bool = false
+    @Published var isDarkMode: Bool = true
+
+    // Dialogs & Modals
+    @Published var showingAddSongModal: Bool = false
+    @Published var showingArrangerPanel: Bool = false
+    @Published var showingTransposeDialog: Bool = false
 
     // Setlist & Song
     @Published var setlist: SetlistItem = MockSongData.defaultSetlist
@@ -87,6 +94,30 @@ final class ShowViewModel: ObservableObject {
         } else {
             nextSong = nil
         }
+    }
+
+    func moveSong(from source: IndexSet, to destination: Int) {
+        setlist.songs.move(fromOffsets: source, toOffset: destination)
+    }
+
+    func cycleTransition(for songId: String) {
+        guard let idx = setlist.songs.firstIndex(where: { $0.id == songId }) else { return }
+        let modes = TransitionMode.allCases
+        let currentMode = setlist.songs[idx].transition
+        let nextIdx = (modes.firstIndex(of: currentMode)! + 1) % modes.count
+        setlist.songs[idx].transition = modes[nextIdx]
+    }
+
+    func addSection(name: String, color: Color) {
+        let lastBar = currentSong.sections.map { $0.startBar + $0.lengthBars }.max() ?? 1
+        let newSec = SectionItem(
+            id: currentSong.sections.count,
+            name: name,
+            startBar: lastBar,
+            lengthBars: 8,
+            color: color
+        )
+        currentSong.sections.append(newSec)
     }
 
     // MARK: - Navigation

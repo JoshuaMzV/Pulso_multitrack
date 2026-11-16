@@ -5,28 +5,52 @@ struct EditionView: View {
     @ObservedObject var vm: ShowViewModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            // 1. LEFT SIDEBAR (.edition-sidebar)
-            sidebarSection
-                .frame(width: 240)
-                .background(PulsoTheme.panel2)
-                .overlay(
-                    Rectangle()
-                        .frame(width: 1)
-                        .foregroundColor(PulsoTheme.line),
-                    alignment: .trailing
-                )
+        ZStack {
+            HStack(spacing: 0) {
+                // 1. LEFT SIDEBAR (.edition-sidebar)
+                sidebarSection
+                    .frame(width: 250)
+                    .background(PulsoTheme.panel2)
+                    .overlay(
+                        Rectangle()
+                            .frame(width: 1)
+                            .foregroundColor(PulsoTheme.line),
+                        alignment: .trailing
+                    )
 
-            // 2. MAIN WORKSPACE (.edition-main)
-            VStack(spacing: 12) {
-                // UPPER CARD: MULTITRACK TIMELINE (.console-timeline-card)
-                multitrackTimelineCard
+                // 2. MAIN WORKSPACE (.edition-main)
+                VStack(spacing: 12) {
+                    // UPPER CARD: MULTITRACK TIMELINE (.console-timeline-card)
+                    multitrackTimelineCard
 
-                // LOWER CARD: STEMS MIXER RACK (.console-mixer-card)
-                editionMixerCard
+                    // LOWER CARD: STEMS MIXER RACK (.console-mixer-card)
+                    editionMixerCard
+                }
+                .padding(12)
+                .background(PulsoTheme.bg)
             }
-            .padding(12)
-            .background(PulsoTheme.bg)
+
+            // Arranger Dropdown Panel
+            if vm.showingArrangerPanel {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
+                    .onTapGesture { vm.showingArrangerPanel = false }
+
+                ArrangerSubmenuPanel(vm: vm)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            // Transpose Dialog
+            if vm.showingTransposeDialog {
+                TransposeDialogView(vm: vm, isPresented: $vm.showingTransposeDialog)
+                    .transition(.opacity)
+            }
+
+            // Add Song Choice Modal (Nube vs Local)
+            if vm.showingAddSongModal {
+                AddSongChoiceModalView(vm: vm)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PulsoTheme.bg.ignoresSafeArea())
@@ -55,7 +79,8 @@ struct EditionView: View {
 
                 Spacer()
 
-                Button(action: {}) {
+                // + Button opens Nube vs Local Choice Modal
+                Button(action: { vm.showingAddSongModal = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(PulsoTheme.ink2)
@@ -68,19 +93,17 @@ struct EditionView: View {
             .padding(.vertical, 12)
             .border(PulsoTheme.line, width: 1)
 
-            // Songs List (.song-items-list)
+            // Songs List with Reordering and Inter-song Transitions
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     ForEach(Array(vm.setlist.songs.enumerated()), id: \.element.id) { index, song in
                         let isActive = song.id == vm.currentSong.id
+
+                        // Song Card
                         Button(action: { vm.loadSong(song) }) {
                             VStack(spacing: 6) {
-                                // Top row: Reorder up, Title, Key badge
+                                // Top row: Title & Key badge (No arrows)
                                 HStack(spacing: 6) {
-                                    Image(systemName: "triangle.fill")
-                                        .font(.system(size: 8))
-                                        .foregroundColor(PulsoTheme.mut)
-
                                     Text("\(index + 1). \(song.title)")
                                         .font(.system(size: 12, weight: .bold))
                                         .foregroundColor(isActive ? PulsoTheme.ink : PulsoTheme.textLight)
@@ -101,13 +124,8 @@ struct EditionView: View {
                                         .cornerRadius(3)
                                 }
 
-                                // Bottom row: Reorder down, BPM, Time signature, Delete
+                                // Bottom row: BPM, Time signature, Delete
                                 HStack(spacing: 6) {
-                                    Image(systemName: "triangle.fill")
-                                        .rotationEffect(.degrees(180))
-                                        .font(.system(size: 8))
-                                        .foregroundColor(PulsoTheme.mut)
-
                                     Text("\(Int(song.bpm)) BPM \(song.timeSignature)")
                                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                         .foregroundColor(PulsoTheme.textDim)
@@ -128,6 +146,36 @@ struct EditionView: View {
                             )
                             .cornerRadius(8)
                         }
+
+                        // Inter-song Transition Connector (.sc-transition)
+                        if index < vm.setlist.songs.count - 1 {
+                            HStack(spacing: 6) {
+                                Rectangle().fill(PulsoTheme.line).frame(height: 1)
+
+                                Button(action: {
+                                    vm.cycleTransition(for: song.id)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Text(song.transition.icon)
+                                            .font(.system(size: 11, weight: .bold))
+                                        Text(song.transition.label)
+                                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                    }
+                                    .foregroundColor(PulsoTheme.amber)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(PulsoTheme.raise)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(PulsoTheme.line2, lineWidth: 1)
+                                    )
+                                    .cornerRadius(12)
+                                }
+
+                                Rectangle().fill(PulsoTheme.line).frame(height: 1)
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
                 }
                 .padding(10)
@@ -135,8 +183,19 @@ struct EditionView: View {
 
             Spacer()
 
+            // User Dropdown Menu Popover
+            if vm.showingUserDropdown {
+                UserDropdownView(vm: vm)
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+            }
+
             // Sidebar Account Slot (.sidebar-account-slot)
-            Button(action: { vm.showingAuthModal = true }) {
+            Button(action: {
+                withAnimation {
+                    vm.showingUserDropdown.toggle()
+                }
+            }) {
                 HStack(spacing: 10) {
                     // Avatar
                     Text(vm.currentUser.avatar)
@@ -188,22 +247,42 @@ struct EditionView: View {
                     Text(vm.currentSong.artist)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(PulsoTheme.textDim)
+
+                    // Song Key Button in Edition view
+                    Button(action: { vm.showingTransposeDialog = true }) {
+                        Text(vm.currentSong.key)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(PulsoTheme.amber)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.black.opacity(0.6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(PulsoTheme.line2, lineWidth: 1)
+                            )
+                            .cornerRadius(4)
+                    }
                 }
 
                 Spacer()
 
                 HStack(spacing: 8) {
-                    Button(action: {}) {
+                    // ARRANGER Submenu Toggle Button
+                    Button(action: {
+                        withAnimation {
+                            vm.showingArrangerPanel.toggle()
+                        }
+                    }) {
                         HStack(spacing: 5) {
                             Image(systemName: "square.split.2x2")
                                 .font(.system(size: 11))
                             Text("ARRANGER")
                                 .font(.system(size: 11, weight: .bold))
                         }
-                        .foregroundColor(PulsoTheme.ink2)
+                        .foregroundColor(vm.showingArrangerPanel ? Color(hex: 0x060709) : PulsoTheme.ink2)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(PulsoTheme.raise)
+                        .background(vm.showingArrangerPanel ? PulsoTheme.amber : PulsoTheme.raise)
                         .cornerRadius(5)
                     }
 
@@ -361,9 +440,9 @@ struct TimelineTrackRow: View {
                 .frame(width: 64, alignment: .leading)
                 .padding(.leading, 8)
 
-            // Waveform representation
+            // Monochrome Gray Waveform representation
             WaveformLaneShape(stemId: stem.id)
-                .stroke(stem.accentColor.opacity(0.85), lineWidth: 1)
+                .stroke(Color(hex: 0x8C9298), lineWidth: 1)
                 .frame(height: 18)
                 .background(Color.black.opacity(0.4))
                 .border(PulsoTheme.line.opacity(0.4), width: 0.5)
