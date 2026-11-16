@@ -245,6 +245,11 @@ struct ModernShowView: View {
 
                             Spacer()
 
+                            // Waveform Audio Bars (.mo-arr-wave)
+                            ArrangerWaveformBars(isActive: isActive)
+
+                            Spacer()
+
                             // Bar label
                             Text("C.\(sec.startBar)")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -467,5 +472,23 @@ struct ModernShowView: View {
     private func formatCountdown(_ sec: Double) -> String {
         let s = Int(max(0, sec))
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+// MARK: - Arranger Waveform Audio Bars (.mo-arr-wave)
+
+struct ArrangerWaveformBars: View {
+    let isActive: Bool
+    let heights: [CGFloat] = [10, 22, 14, 28, 16, 24, 18, 12]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 3.5) {
+            ForEach(0..<heights.count, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(isActive ? Color(hex: 0x111111).opacity(0.85) : Color.white.opacity(0.85))
+                    .frame(width: 3.5, height: heights[i])
+            }
+        }
+        .frame(height: 30)
     }
 }

@@ -13,11 +13,7 @@ struct PulsoRootView: View {
 
                 // Content View (SHOW or EDICIÓN)
                 if vm.mode == .show {
-                    if vm.showSubmode == .stage {
-                        ModernShowView(vm: vm)
-                    } else {
-                        StemsMixerView(vm: vm)
-                    }
+                    ModernShowView(vm: vm)
                 } else {
                     EditionView(vm: vm)
                 }
