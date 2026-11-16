@@ -165,6 +165,22 @@ final class ShowViewModel: ObservableObject {
         currentSeconds = Double(sec.startBar - 1) * secondsPerBar
     }
 
+    func seek(to seconds: Double) {
+        let clamped = max(0.0, min(currentSong.durationSeconds, seconds))
+        currentSeconds = clamped
+        let beatsPerSecond = currentSong.bpm / 60.0
+        let totalBeats = Int(currentSeconds * beatsPerSecond)
+        currentBar = (totalBeats / 4) + 1
+        currentBeat = (totalBeats % 4) + 1
+
+        for (idx, sec) in currentSong.sections.enumerated() {
+            if currentBar >= sec.startBar && currentBar < (sec.startBar + sec.lengthBars) {
+                activeSectionIndex = idx
+                break
+            }
+        }
+    }
+
     func toggleLoop() {
         loopSection.toggle()
     }

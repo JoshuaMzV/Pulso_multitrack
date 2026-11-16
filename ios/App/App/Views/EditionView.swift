@@ -301,27 +301,45 @@ struct EditionView: View {
             .padding(.vertical, 8)
             .background(PulsoTheme.panel2)
 
-            // Timeline Area
+            // Timeline Area (Ocupa todo el espacio disponible)
             VStack(spacing: 0) {
+                // Arranger Sections Band (.tl-band de Pulso Web)
+                arrangerSectionsBandView
+                    .frame(height: 18)
+                    .background(Color(hex: 0x1A1714))
+                    .border(PulsoTheme.line, width: 0.5)
+
                 // Time Ruler (Bars 1, 5, 9, 13, ...)
                 timeRulerView
-                    .frame(height: 22)
+                    .frame(height: 20)
                     .background(PulsoTheme.blackBox)
                     .border(PulsoTheme.line, width: 0.5)
 
-                // Track Lanes with Waveforms & Playhead
-                ZStack(alignment: .leading) {
-                    VStack(spacing: 1) {
-                        ForEach(vm.stems) { stem in
-                            TimelineTrackRow(stem: stem, isSelected: stem.id == vm.selectedTrackId)
+                // Track Lanes with Waveforms & Playhead (ocupa todo el alto del contenedor)
+                GeometryReader { geo in
+                    let totalHeight = geo.size.height
+                    let count = max(1, vm.stems.count)
+                    let spacing: CGFloat = 1.0
+                    let availableForRows = totalHeight - (CGFloat(count - 1) * spacing)
+                    let rowHeight = max(24.0, availableForRows / CGFloat(count))
+
+                    ZStack(alignment: .leading) {
+                        // Tracks ocupando el 100% del alto
+                        VStack(spacing: spacing) {
+                            ForEach(vm.stems) { stem in
+                                TimelineTrackRow(
+                                    stem: stem,
+                                    isSelected: stem.id == vm.selectedTrackId,
+                                    rowHeight: rowHeight
+                                )
                                 .onTapGesture {
                                     vm.selectTrack(id: stem.id)
                                 }
+                            }
                         }
-                    }
+                        .frame(width: geo.size.width, height: totalHeight)
 
-                    // Playhead vertical line
-                    GeometryReader { geo in
+                        // Playhead vertical line
                         let pct = vm.currentSong.durationSeconds > 0 ?
                             CGFloat(vm.currentSeconds / vm.currentSong.durationSeconds) : 0
                         let xPos = 64.0 + (geo.size.width - 64.0) * pct
@@ -332,16 +350,79 @@ struct EditionView: View {
                             .offset(x: xPos)
                             .shadow(color: PulsoTheme.amberGlow, radius: 4, x: 0, y: 0)
                     }
+                    .frame(width: geo.size.width, height: totalHeight)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let touchX = value.location.x
+                                if touchX >= 64.0 {
+                                    let trackW = max(1.0, geo.size.width - 64.0)
+                                    let ratio = max(0.0, min(1.0, Double((touchX - 64.0) / trackW)))
+                                    vm.seek(to: ratio * vm.currentSong.durationSeconds)
+                                }
+                            }
+                    )
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(PulsoTheme.panel)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PulsoTheme.panel)
         .overlay(
             RoundedRectangle(cornerRadius: PulsoTheme.radMd)
                 .stroke(PulsoTheme.border, lineWidth: 1)
         )
         .cornerRadius(PulsoTheme.radMd)
+    }
+
+    private var arrangerSectionsBandView: some View {
+        HStack(spacing: 0) {
+            Text("ARRANGER")
+                .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                .foregroundColor(PulsoTheme.mut)
+                .frame(width: 64, alignment: .leading)
+                .padding(.leading, 8)
+
+            GeometryReader { geo in
+                let totalBars: CGFloat = 96.0
+                let bandWidth = geo.size.width
+
+                ZStack(alignment: .leading) {
+                    ForEach(vm.currentSong.sections) { sec in
+                        let leftPct = CGFloat(sec.startBar - 1) / totalBars
+                        let widthPct = CGFloat(sec.lengthBars) / totalBars
+                        let xPos = leftPct * bandWidth
+                        let secWidth = max(24.0, widthPct * bandWidth)
+
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(sec.color.opacity(0.22))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .stroke(sec.color.opacity(0.8), lineWidth: 1)
+                                )
+
+                            Text(sec.name)
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .foregroundColor(sec.color)
+                                .lineLimit(1)
+                                .padding(.horizontal, 2)
+                        }
+                        .frame(width: secWidth, height: 15)
+                        .offset(x: xPos)
+                        .onTapGesture {
+                            if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
+                                vm.jumpToSection(index: idx)
+                            }
+                        }
+                    }
+                }
+                .frame(width: bandWidth, height: geo.size.height)
+            }
+        }
     }
 
     private var timeRulerView: some View {
@@ -356,7 +437,7 @@ struct EditionView: View {
                     HStack(spacing: 2) {
                         Text("\(bar)")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(PulsoTheme.ink2)
+                            .foregroundColor(PulsoTheme.amber)
                         Rectangle()
                             .fill(PulsoTheme.line2)
                             .frame(width: 1, height: 6)
@@ -429,6 +510,7 @@ struct EditionView: View {
 struct TimelineTrackRow: View {
     let stem: StemItem
     let isSelected: Bool
+    var rowHeight: CGFloat = 28
 
     var body: some View {
         HStack(spacing: 0) {
@@ -440,15 +522,26 @@ struct TimelineTrackRow: View {
                 .frame(width: 64, alignment: .leading)
                 .padding(.leading, 8)
 
-            // Monochrome Gray Waveform representation
-            WaveformLaneShape(stemId: stem.id)
-                .stroke(Color(hex: 0x8C9298), lineWidth: 1)
-                .frame(height: 18)
-                .background(Color.black.opacity(0.4))
-                .border(PulsoTheme.line.opacity(0.4), width: 0.5)
+            // Monochrome Gray Waveform representation (fills entire lane)
+            ZStack {
+                // Background of lane
+                Color.black.opacity(0.4)
+
+                // Continuous horizontal center baseline
+                Rectangle()
+                    .fill(Color(hex: 0x8C9298).opacity(0.35))
+                    .frame(height: 1)
+
+                // Monochrome Gray Waveform bars/envelope filling full lane
+                WaveformLaneShape(stemId: stem.id)
+                    .stroke(Color(hex: 0x8C9298), lineWidth: 1)
+                    .padding(.vertical, 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .border(PulsoTheme.line.opacity(0.4), width: 0.5)
         }
-        .frame(height: 20)
-        .background(isSelected ? PulsoTheme.amber.opacity(0.06) : Color.clear)
+        .frame(height: rowHeight)
+        .background(isSelected ? PulsoTheme.amber.opacity(0.08) : Color.clear)
     }
 }
 
@@ -459,7 +552,7 @@ struct WaveformLaneShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let step: CGFloat = 3.0
+        let step: CGFloat = 2.5
         let midY = rect.midY
 
         for x in stride(from: 0, to: rect.width, by: step) {
@@ -467,19 +560,19 @@ struct WaveformLaneShape: Shape {
             let baseEnv: Double
             if stemId == "click" {
                 // Sharp periodic spikes
-                baseEnv = (Int(x) % 24 < 3) ? 0.8 : 0.05
+                baseEnv = (Int(x) % 24 < 3) ? 0.85 : 0.04
             } else if stemId == "drums" || stemId == "bass" {
                 // Dense rhythmic waveforms
-                baseEnv = 0.25 + 0.65 * abs(sin(ratio * 70.0) * cos(ratio * 35.0))
+                baseEnv = 0.25 + 0.70 * abs(sin(ratio * 70.0) * cos(ratio * 35.0))
             } else if stemId == "guide" {
                 // Sparse vocal cues
-                baseEnv = (sin(ratio * 18.0) > 0.4) ? 0.7 : 0.05
+                baseEnv = (sin(ratio * 18.0) > 0.35) ? 0.75 : 0.04
             } else {
                 // Melodic instruments
-                baseEnv = 0.15 + 0.55 * abs(sin(ratio * 40.0))
+                baseEnv = 0.18 + 0.65 * abs(sin(ratio * 40.0))
             }
 
-            let amp = CGFloat(baseEnv) * (rect.height / 2.0)
+            let amp = CGFloat(baseEnv) * max(2.0, (rect.height / 2.0 - 2.0))
             path.move(to: CGPoint(x: x, y: midY - amp))
             path.addLine(to: CGPoint(x: x, y: midY + amp))
         }
