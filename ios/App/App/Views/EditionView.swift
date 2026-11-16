@@ -136,33 +136,36 @@ struct EditionView: View {
             Spacer()
 
             // Sidebar Account Slot (.sidebar-account-slot)
-            HStack(spacing: 10) {
-                // Avatar AD
-                Text("AD")
-                    .font(.system(size: 11, weight: .black))
-                    .foregroundColor(Color(hex: 0x111111))
-                    .frame(width: 28, height: 28)
-                    .background(PulsoTheme.amber)
-                    .cornerRadius(14)
+            Button(action: { vm.showingAuthModal = true }) {
+                HStack(spacing: 10) {
+                    // Avatar
+                    Text(vm.currentUser.avatar)
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(Color(hex: 0x111111))
+                        .frame(width: 28, height: 28)
+                        .background(PulsoTheme.amber)
+                        .cornerRadius(14)
 
-                Text("@admin_josh")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(PulsoTheme.ink2)
+                    Text("@\(vm.currentUser.username)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(PulsoTheme.ink2)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
 
-                Text("ADMIN")
-                    .font(.system(size: 9, weight: .black, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(PulsoTheme.purple)
-                    .cornerRadius(4)
+                    Text(vm.currentUser.role.rawValue)
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(PulsoTheme.purple)
+                        .cornerRadius(4)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(PulsoTheme.panel)
+                .border(PulsoTheme.line, width: 1)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(PulsoTheme.panel)
-            .border(PulsoTheme.line, width: 1)
         }
     }
 

@@ -6,21 +6,31 @@ struct PulsoRootView: View {
     @StateObject private var vm = ShowViewModel()
 
     var body: some View {
-        VStack(spacing: 0) {
-            // App Header (Transport, Time, Bars, Mode Switcher)
-            AppHeaderView(vm: vm)
+        ZStack {
+            VStack(spacing: 0) {
+                // App Header (Transport, Time, Bars, Mode Switcher)
+                AppHeaderView(vm: vm)
 
-            // Content View (SHOW or EDICIÓN)
-            if vm.mode == .show {
-                if vm.showSubmode == .stage {
-                    ModernShowView(vm: vm)
+                // Content View (SHOW or EDICIÓN)
+                if vm.mode == .show {
+                    if vm.showSubmode == .stage {
+                        ModernShowView(vm: vm)
+                    } else {
+                        StemsMixerView(vm: vm)
+                    }
                 } else {
-                    StemsMixerView(vm: vm)
+                    EditionView(vm: vm)
                 }
-            } else {
-                EditionView(vm: vm)
+            }
+
+            // Auth Modal ("ACCESO PULSO")
+            if vm.showingAuthModal {
+                AuthModalView(vm: vm)
+                    .transition(.opacity)
+                    .zIndex(100)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: vm.showingAuthModal)
         .background(PulsoTheme.bg.ignoresSafeArea())
     }
 }

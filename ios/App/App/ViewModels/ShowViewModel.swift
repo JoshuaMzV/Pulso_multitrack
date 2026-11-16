@@ -11,11 +11,31 @@ enum ShowSubmode {
     case mixer // Stems mixer console (Image 2)
 }
 
+enum UserRole: String {
+    case admin = "ADMIN"
+    case leader = "LÍDER"
+    case musician = "MÚSICO"
+    case guest = "INVITADO"
+}
+
+struct UserProfile {
+    var username: String
+    var role: UserRole
+    var avatar: String
+
+    static let `default` = UserProfile(username: "admin_josh", role: .admin, avatar: "AD")
+}
+
 @MainActor
 final class ShowViewModel: ObservableObject {
     // Mode
     @Published var mode: PulsoViewMode = .show
     @Published var showSubmode: ShowSubmode = .stage
+
+    // Authentication State & Modal
+    @Published var currentUser: UserProfile = .default
+    @Published var isLoggedIn: Bool = true
+    @Published var showingAuthModal: Bool = false
 
     // Setlist & Song
     @Published var setlist: SetlistItem = MockSongData.defaultSetlist
@@ -151,6 +171,19 @@ final class ShowViewModel: ObservableObject {
 
     func togglePad() {
         padActive.toggle()
+    }
+
+    // MARK: - Auth Actions
+
+    func login(username: String) {
+        let initial = username.prefix(2).uppercased()
+        currentUser = UserProfile(username: username, role: .admin, avatar: initial.isEmpty ? "US" : initial)
+        isLoggedIn = true
+    }
+
+    func logout() {
+        currentUser = UserProfile(username: "invitado", role: .guest, avatar: "IN")
+        isLoggedIn = false
     }
 
     // MARK: - Internal Simulation Clock (Active until Phase 2 AudioEngine attaches)

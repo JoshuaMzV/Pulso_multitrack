@@ -89,64 +89,109 @@ struct AppHeaderView: View {
                 .cornerRadius(6)
             }
 
-            Spacer()
+            // Dead Center is 100% CLEAR for iPadOS Multitasking 3-dots (...)
+            Spacer(minLength: 40)
 
-            if vm.mode == .show {
-                // Center Dots in Show Mode (.hdr-more-btn)
-                Button(action: {
-                    // Toggle between Stage (Image 1) and Mixer (Image 2)
-                    vm.toggleShowMixer()
-                }) {
-                    HStack(spacing: 4) {
-                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
-                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
-                        Circle().fill(PulsoTheme.textDim).frame(width: 4, height: 4)
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 30)
-                    .background(PulsoTheme.panel)
-                    .cornerRadius(6)
+            // Right Cluster (.header-right-cluster)
+            HStack(spacing: 8) {
+                // View Hub (EDICIÓN / SHOW) - Always on the right, completely away from iPad 3 dots
+                viewHub
+
+                // A/B Quick Toggle
+                Button(action: {}) {
+                    Text("A/B")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(PulsoTheme.textDim)
+                        .frame(width: 38, height: 32)
+                        .background(PulsoTheme.raise)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(PulsoTheme.line2, lineWidth: 1)
+                        )
+                        .cornerRadius(6)
                 }
 
-                Spacer()
-
-                // View Hub on the Right
-                viewHub
-            } else {
-                // View Hub in the Center for Edition Mode
-                viewHub
-
-                Spacer()
-
-                // Right Action Buttons for Edition Mode (.hdr-edition-actions)
-                HStack(spacing: 8) {
-                    // A/B Button
+                // In Edition Mode: + SUBIR CANCIÓN
+                if vm.mode == .edition {
                     Button(action: {}) {
-                        Text("A/B")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(PulsoTheme.textDim)
-                            .frame(width: 42, height: 32)
-                            .background(PulsoTheme.panel)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(PulsoTheme.line2, lineWidth: 1)
-                            )
-                            .cornerRadius(6)
-                    }
-
-                    // + Subir Canción Button (.btn-amber)
-                    Button(action: {}) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 5) {
                             Image(systemName: "icloud.and.arrow.up.fill")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                             Text("+ SUBIR CANCIÓN")
-                                .font(.system(size: 11, weight: .heavy))
+                                .font(.system(size: 10.5, weight: .heavy))
                         }
                         .foregroundColor(Color(hex: 0x060709))
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
                         .frame(height: 32)
                         .background(PulsoTheme.amber)
                         .shadow(color: PulsoTheme.amberGlow, radius: 4, x: 0, y: 0)
+                        .cornerRadius(6)
+                    }
+                } else {
+                    // In Show Mode: Button to toggle Stems Mixer
+                    Button(action: { vm.toggleShowMixer() }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: vm.showSubmode == .mixer ? "tv" : "slider.vertical.3")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(vm.showSubmode == .mixer ? "ESCENARIO" : "MEZCLADOR")
+                                .font(.system(size: 10.5, weight: .heavy))
+                        }
+                        .foregroundColor(PulsoTheme.ink2)
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(PulsoTheme.raise)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(PulsoTheme.line2, lineWidth: 1)
+                        )
+                        .cornerRadius(6)
+                    }
+                }
+
+                // User Account Pill (Opens Auth Modal "ACCESO PULSO")
+                Button(action: { vm.showingAuthModal = true }) {
+                    if vm.isLoggedIn {
+                        HStack(spacing: 6) {
+                            Text(vm.currentUser.avatar)
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundColor(Color(hex: 0x111111))
+                                .frame(width: 24, height: 24)
+                                .background(PulsoTheme.amber)
+                                .cornerRadius(12)
+
+                            Text("@\(vm.currentUser.username)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(PulsoTheme.ink2)
+                                .lineLimit(1)
+
+                            Text(vm.currentUser.role.rawValue)
+                                .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(PulsoTheme.purple)
+                                .cornerRadius(3)
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(height: 32)
+                        .background(PulsoTheme.panel)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(PulsoTheme.line, lineWidth: 1)
+                        )
+                        .cornerRadius(6)
+                    } else {
+                        HStack(spacing: 5) {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(PulsoTheme.amber)
+                            Text("LOGIN")
+                                .font(.system(size: 11, weight: .heavy))
+                                .foregroundColor(PulsoTheme.ink)
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(PulsoTheme.raise)
                         .cornerRadius(6)
                     }
                 }
