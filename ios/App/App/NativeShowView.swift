@@ -27,7 +27,6 @@ struct PulsoRootView: View {
             if vm.showingAuthModal {
                 AuthModalView(vm: vm)
                     .transition(.opacity)
-                    .zIndex(100)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: vm.showingAuthModal)
