@@ -7,6 +7,8 @@ enum PulsoTheme {
     static let panel = Color(hex: 0x1C1916)
     static let panel2 = Color(hex: 0x171412)
     static let cardBg = Color(hex: 0x1A1A1A)
+    static let card = Color(hex: 0x1A1A1A)
+    static let surface = Color(hex: 0x1C1916)
     static let raise = Color(hex: 0x272219)
     static let raiseHover = Color(hex: 0x332C23)
     static let navBtnBg = Color(hex: 0x1F1F1F)

@@ -25,7 +25,7 @@ final class LocalDatabaseService {
     func loadLocalSetlists() -> [SetlistItem] {
         let setlistsFile = documentsDirectory.appendingPathComponent("setlists.json")
         guard FileManager.default.fileExists(atPath: setlistsFile.path),
-              let data = try? Data(contentsOf: setlistsFile) else {
+              (try? Data(contentsOf: setlistsFile)) != nil else {
             return [MockSongData.defaultSetlist]
         }
 
