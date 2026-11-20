@@ -16,6 +16,15 @@ enum UserRole: String {
     case leader = "LÍDER"
     case musician = "MÚSICO"
     case guest = "INVITADO"
+
+    static func from(backendRole: String) -> UserRole {
+        switch backendRole.lowercased() {
+        case "admin": return .admin
+        case "director", "lider", "líder": return .leader
+        case "user", "miembro", "musico", "músico": return .musician
+        default: return .guest
+        }
+    }
 }
 
 struct UserProfile {
@@ -68,11 +77,19 @@ final class ShowViewModel: ObservableObject {
     @Published var stems: [StemItem] = []
     @Published var selectedTrackId: String = "guide"
 
+    // Server Configuration
+    @Published var serverURL: String = BackendAPIService.shared.baseURL {
+        didSet {
+            BackendAPIService.shared.baseURL = serverURL
+        }
+    }
+
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
 
     init() {
         self.loadSong(MockSongData.song1)
+        self.checkSessionWithBackend()
     }
 
     func selectTrack(id: String) {
@@ -226,6 +243,50 @@ final class ShowViewModel: ObservableObject {
 
     // MARK: - Auth Actions
 
+    func checkSessionWithBackend() {
+        Task {
+            do {
+                if let serverUser = try await BackendAPIService.shared.checkSession() {
+                    self.currentUser = UserProfile(
+                        username: serverUser.username,
+                        role: serverUser.userRole,
+                        avatar: serverUser.avatar
+                    )
+                    self.isLoggedIn = true
+                } else if !BackendAPIService.shared.isAuthenticated {
+                    self.isLoggedIn = false
+                    self.currentUser = UserProfile(username: "invitado", role: .guest, avatar: "IN")
+                }
+            } catch {
+                print("[PULSO API] Error comprobando sesión previa: \(error)")
+            }
+        }
+    }
+
+    func loginWithBackend(username: String, password: String) async throws {
+        let serverUser = try await BackendAPIService.shared.login(username: username, password: password)
+        self.currentUser = UserProfile(
+            username: serverUser.username,
+            role: serverUser.userRole,
+            avatar: serverUser.avatar
+        )
+        self.isLoggedIn = true
+    }
+
+    func registerWithBackend(username: String, password: String, inviteCode: String) async throws {
+        let serverUser = try await BackendAPIService.shared.register(
+            username: username,
+            password: password,
+            inviteCode: inviteCode
+        )
+        self.currentUser = UserProfile(
+            username: serverUser.username,
+            role: serverUser.userRole,
+            avatar: serverUser.avatar
+        )
+        self.isLoggedIn = true
+    }
+
     func login(username: String) {
         let initial = username.prefix(2).uppercased()
         currentUser = UserProfile(username: username, role: .admin, avatar: initial.isEmpty ? "US" : initial)
@@ -233,6 +294,9 @@ final class ShowViewModel: ObservableObject {
     }
 
     func logout() {
+        Task {
+            await BackendAPIService.shared.logout()
+        }
         currentUser = UserProfile(username: "invitado", role: .guest, avatar: "IN")
         isLoggedIn = false
     }

@@ -14,6 +14,9 @@ struct AuthModalView: View {
     @State private var inviteCodeInput: String = ""
     @State private var alertMessage: String? = nil
     @State private var alertIsError: Bool = true
+    @State private var isSubmitting: Bool = false
+    @State private var showServerConfig: Bool = false
+    @State private var serverURLInput: String = ""
 
     var body: some View {
         ZStack {
@@ -49,7 +52,73 @@ struct AuthModalView: View {
                             .cornerRadius(4)
                     }
                 }
-                .padding(.bottom, 16)
+                .padding(.bottom, 12)
+
+                // Server URL Config Row
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .font(.system(size: 10))
+                        .foregroundColor(PulsoTheme.amber)
+
+                    Text("Servidor:")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(PulsoTheme.mut)
+
+                    Text(vm.serverURL)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(PulsoTheme.ink2)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Button(action: {
+                        serverURLInput = vm.serverURL
+                        showServerConfig.toggle()
+                    }) {
+                        Text(showServerConfig ? "Ocultar" : "Cambiar")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(PulsoTheme.amber)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(PulsoTheme.raise)
+                            .cornerRadius(3)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(PulsoTheme.panel2)
+                .cornerRadius(6)
+                .padding(.bottom, 12)
+
+                if showServerConfig {
+                    HStack(spacing: 8) {
+                        TextField("http://192.168.1.X:5000", text: $serverURLInput)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(PulsoTheme.ink)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(PulsoTheme.raise)
+                            .cornerRadius(4)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+
+                        Button(action: {
+                            if !serverURLInput.isEmpty {
+                                vm.serverURL = serverURLInput
+                                showServerConfig = false
+                            }
+                        }) {
+                            Text("Guardar")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Color(hex: 0x0E0C0A))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(PulsoTheme.amber)
+                                .cornerRadius(4)
+                        }
+                    }
+                    .padding(.bottom, 12)
+                }
 
                 // 2. Tabs (.auth-tabs)
                 HStack(spacing: 16) {
@@ -181,17 +250,24 @@ struct AuthModalView: View {
 
                 Button(action: performLogin) {
                     HStack(spacing: 6) {
-                        Image(systemName: "arrow.right.to.line")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("ENTRAR")
-                            .font(.system(size: 12, weight: .heavy))
+                        if isSubmitting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: 0x060709)))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "arrow.right.to.line")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("ENTRAR")
+                                .font(.system(size: 12, weight: .heavy))
+                        }
                     }
                     .foregroundColor(Color(hex: 0x060709))
                     .frame(maxWidth: .infinity * 1.6)
                     .frame(height: 38)
-                    .background(PulsoTheme.amber)
+                    .background(isSubmitting ? PulsoTheme.amber.opacity(0.6) : PulsoTheme.amber)
                     .cornerRadius(6)
                 }
+                .disabled(isSubmitting)
             }
             .padding(.top, 10)
         }
@@ -283,44 +359,102 @@ struct AuthModalView: View {
 
                 Button(action: performRegister) {
                     HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("CREAR CUENTA")
-                            .font(.system(size: 12, weight: .heavy))
+                        if isSubmitting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: 0x060709)))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("CREAR CUENTA")
+                                .font(.system(size: 12, weight: .heavy))
+                        }
                     }
                     .foregroundColor(Color(hex: 0x060709))
                     .frame(maxWidth: .infinity * 1.6)
                     .frame(height: 38)
-                    .background(PulsoTheme.amber)
+                    .background(isSubmitting ? PulsoTheme.amber.opacity(0.6) : PulsoTheme.amber)
                     .cornerRadius(6)
                 }
+                .disabled(isSubmitting)
             }
             .padding(.top, 10)
         }
     }
 
     private func performLogin() {
-        guard !usernameInput.trimmingCharacters(in: .whitespaces).isEmpty else {
+        let u = usernameInput.trimmingCharacters(in: .whitespaces)
+        let p = passwordInput.trimmingCharacters(in: .whitespaces)
+
+        guard !u.isEmpty else {
             alertMessage = "Ingresa tu nombre de usuario."
             alertIsError = true
             return
         }
-        vm.login(username: usernameInput)
-        vm.showingAuthModal = false
+        guard !p.isEmpty else {
+            alertMessage = "Ingresa tu contraseña."
+            alertIsError = true
+            return
+        }
+
+        alertMessage = nil
+        isSubmitting = true
+
+        Task {
+            do {
+                try await vm.loginWithBackend(username: u, password: p)
+                await MainActor.run {
+                    self.isSubmitting = false
+                    self.vm.showingAuthModal = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isSubmitting = false
+                    self.alertMessage = error.localizedDescription
+                    self.alertIsError = true
+                }
+            }
+        }
     }
 
     private func performRegister() {
-        guard !inviteCodeInput.trimmingCharacters(in: .whitespaces).isEmpty else {
+        let c = inviteCodeInput.trimmingCharacters(in: .whitespaces)
+        let u = usernameInput.trimmingCharacters(in: .whitespaces)
+        let p = passwordInput.trimmingCharacters(in: .whitespaces)
+
+        guard !c.isEmpty else {
             alertMessage = "El código de invitación es requerido."
             alertIsError = true
             return
         }
-        guard !usernameInput.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard !u.isEmpty else {
             alertMessage = "Ingresa tu nombre de usuario."
             alertIsError = true
             return
         }
-        vm.login(username: usernameInput)
-        vm.showingAuthModal = false
+        guard !p.isEmpty else {
+            alertMessage = "Ingresa tu contraseña."
+            alertIsError = true
+            return
+        }
+
+        alertMessage = nil
+        isSubmitting = true
+
+        Task {
+            do {
+                try await vm.registerWithBackend(username: u, password: p, inviteCode: c)
+                await MainActor.run {
+                    self.isSubmitting = false
+                    self.vm.showingAuthModal = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isSubmitting = false
+                    self.alertMessage = error.localizedDescription
+                    self.alertIsError = true
+                }
+            }
+        }
     }
 }

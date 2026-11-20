@@ -30,9 +30,9 @@ struct UserDropdownView: View {
                             .cornerRadius(3)
                     }
 
-                    Text("Modo local")
+                    Text(vm.isLoggedIn ? "Conectado al servidor" : "Modo local / Desconectado")
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(PulsoTheme.mut)
+                        .foregroundColor(vm.isLoggedIn ? PulsoTheme.green : PulsoTheme.mut)
                 }
 
                 Spacer()
@@ -41,43 +41,45 @@ struct UserDropdownView: View {
 
             Divider().background(PulsoTheme.line)
 
-            // Item 1: Iniciar Sesión
-            Button(action: {
-                vm.showingUserDropdown = false
-                vm.showingAuthModal = true
-            }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.right.to.line")
-                        .font(.system(size: 12))
-                        .foregroundColor(PulsoTheme.amber)
-                    Text("Iniciar Sesión")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(PulsoTheme.ink)
-                    Spacer()
+            if !vm.isLoggedIn {
+                // Item 1: Iniciar Sesión
+                Button(action: {
+                    vm.showingUserDropdown = false
+                    vm.showingAuthModal = true
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.right.to.line")
+                            .font(.system(size: 12))
+                            .foregroundColor(PulsoTheme.amber)
+                        Text("Iniciar Sesión")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(PulsoTheme.ink)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
 
-            // Item 2: Canjear Invitación
-            Button(action: {
-                vm.showingUserDropdown = false
-                vm.showingAuthModal = true
-            }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "ticket.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(PulsoTheme.amber)
-                    Text("Canjear Invitación")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(PulsoTheme.ink)
-                    Spacer()
+                // Item 2: Canjear Invitación
+                Button(action: {
+                    vm.showingUserDropdown = false
+                    vm.showingAuthModal = true
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "ticket.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(PulsoTheme.amber)
+                        Text("Canjear Invitación")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(PulsoTheme.ink)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
 
-            Divider().background(PulsoTheme.line)
+                Divider().background(PulsoTheme.line)
+            }
 
             // Item 3: Tema Claro / Oscuro
             HStack(spacing: 10) {
