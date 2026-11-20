@@ -47,7 +47,7 @@ struct AddSongChoiceModalView: View {
                     // Option 1: NUBE
                     Button(action: {
                         vm.showingAddSongModal = false
-                        // Load or download song
+                        vm.showingCloudCatalogModal = true
                     }) {
                         VStack(spacing: 12) {
                             ZStack {

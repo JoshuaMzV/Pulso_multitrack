@@ -6,7 +6,7 @@ import uuid
 import urllib.request
 from flask import request, jsonify
 from werkzeug.utils import secure_filename
-from backend.config import SONGS_DIR, TEMP_DIR, CHUNKS_DIR, SETLISTS_FILE
+from backend.config import DATA_DIR, SONGS_DIR, TEMP_DIR, CHUNKS_DIR, SETLISTS_FILE
 from backend.services.flac import convert_to_flac
 from backend.services.stem_classifier import classify_stem_filename, AUDIO_EXTENSIONS
 from backend.services.auth import normalize_song_key, assign_song_to_group
@@ -544,6 +544,19 @@ def import_song_from_cloud():
             except: pass
 
 
+@app.route('/api/catalog', methods=['GET'])
+def get_catalog():
+    """Retorna el catálogo público de canciones y stems disponibles en el CDN."""
+    catalog_path = os.path.join(DATA_DIR, 'catalog.json')
+    if os.path.isfile(catalog_path):
+        try:
+            with open(catalog_path, 'r', encoding='utf-8') as f:
+                return jsonify(json.load(f)), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "ok", "service": "PULSO Multitracks CDN", "songs": []}), 200
+
+
 @app.route('/api/songs', methods=['GET'])
 def list_songs():
     current_user = get_auth_user()
@@ -551,17 +564,38 @@ def list_songs():
     if not current_user:
         return jsonify([]), 200
 
-    all_songs = []
+    catalog_path = os.path.join(DATA_DIR, 'catalog.json')
+    cloud_songs = []
+    if os.path.isfile(catalog_path):
+        try:
+            with open(catalog_path, 'r', encoding='utf-8') as f:
+                cat_data = json.load(f)
+                cloud_songs = cat_data.get('songs', [])
+        except Exception as e:
+            print(f"Error leyendo {catalog_path}: {e}")
+
+    local_songs = []
     if os.path.exists(SONGS_DIR):
         for folder in os.listdir(SONGS_DIR):
             meta_path = os.path.join(SONGS_DIR, folder, 'metadata.json')
             if os.path.isfile(meta_path):
                 try:
                     with open(meta_path, 'r', encoding='utf-8') as f:
-                        all_songs.append(json.load(f))
+                        local_songs.append(json.load(f))
                 except Exception as e:
                     print(f"Error leyendo {meta_path}: {e}")
 
+    # Unir sin duplicados manteniendo la versión local o del catálogo
+    seen_titles = set()
+    result = []
+    for s in local_songs + cloud_songs:
+        t = (s.get('title') or '').strip().lower()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            result.append(s)
+        elif not t:
+            result.append(s)
+
     # Catalogo compartido: todos los usuarios autenticados ven todas las canciones
-    return jsonify(all_songs), 200
+    return jsonify(result), 200
 

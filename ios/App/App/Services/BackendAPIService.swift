@@ -6,7 +6,7 @@ struct ServerUser: Codable {
     let id: Int
     let username: String
     let role: String
-    let grupo_id: Int?
+    let grupo_id: String?
     let group_name: String?
 
     var userRole: UserRole {
@@ -31,6 +31,36 @@ struct AuthResponse: Codable {
 struct AuthMeResponse: Codable {
     let authenticated: Bool
     let user: ServerUser?
+}
+
+struct CloudSongStem: Codable, Identifiable {
+    let id: String
+    let original: String?
+    let filename: String?
+    let label: String?
+    let category: String?
+    let url: String?
+    let existsOnServer: Bool?
+}
+
+struct CloudSong: Codable, Identifiable {
+    let id: String
+    let title: String
+    let artist: String?
+    let bpm: Double?
+    let key: String?
+    let filename: String?
+    let downloadUrl: String?
+    let cover: String?
+    let extractedFolder: String?
+    let stems: [CloudSongStem]?
+    let date: String?
+}
+
+struct CloudCatalogResponse: Codable {
+    let status: String?
+    let service: String?
+    let songs: [CloudSong]?
 }
 
 // MARK: - API Error
@@ -69,10 +99,12 @@ final class BackendAPIService {
 
     private init() {}
 
+    static let defaultURL = "https://stems.tld-list.lat"
+
     /// Base URL of the backend API (configurable)
     var baseURL: String {
         get {
-            defaults.string(forKey: serverURLKey) ?? "http://127.0.0.1:5000"
+            defaults.string(forKey: serverURLKey) ?? Self.defaultURL
         }
         set {
             var cleaned = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -216,6 +248,56 @@ final class BackendAPIService {
             _ = try? await performRequest(request)
         }
         self.authToken = nil
+    }
+
+    // MARK: - Cloud Catalog & Song Download Methods
+
+    /// Obtiene el catálogo de canciones disponibles en la nube
+    func fetchCatalog() async throws -> [CloudSong] {
+        guard let url = URL(string: "\(baseURL)/api/songs") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.serverError("Error al obtener canciones del servidor")
+        }
+
+        // 1. Intentar decodificar como array directo de CloudSong
+        if let list = try? JSONDecoder().decode([CloudSong].self, from: data) {
+            return list
+        }
+
+        // 2. Intentar decodificar como objeto catálogo { "songs": [...] }
+        if let cat = try? JSONDecoder().decode(CloudCatalogResponse.self, from: data), let songs = cat.songs {
+            return songs
+        }
+
+        // 3. Fallback directo a /catalog.json
+        if let catUrl = URL(string: "\(baseURL)/catalog.json") {
+            let catReq = URLRequest(url: catUrl)
+            if let (catData, _) = try? await performRequest(catReq),
+               let cat = try? JSONDecoder().decode(CloudCatalogResponse.self, from: catData),
+               let songs = cat.songs {
+                return songs
+            }
+        }
+        return []
+    }
+
+    /// Descarga un stem individual directamente al directorio local de la canción
+    func downloadStem(from remoteURL: URL, to destinationURL: URL) async throws {
+        let (tempURL, response) = try await URLSession.shared.download(from: remoteURL)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.serverError("Error al descargar pista (\(remoteURL.lastPathComponent))")
+        }
+        let folder = destinationURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.moveItem(at: tempURL, to: destinationURL)
     }
 
     // MARK: - Internal HTTP Helper

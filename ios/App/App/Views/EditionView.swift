@@ -46,11 +46,7 @@ struct EditionView: View {
                     .transition(.opacity)
             }
 
-            // Add Song Choice Modal (Nube vs Local)
-            if vm.showingAddSongModal {
-                AddSongChoiceModalView(vm: vm)
-                    .transition(.opacity)
-            }
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PulsoTheme.bg.ignoresSafeArea())

@@ -50,8 +50,15 @@ final class ShowViewModel: ObservableObject {
 
     // Dialogs & Modals
     @Published var showingAddSongModal: Bool = false
+    @Published var showingCloudCatalogModal: Bool = false
     @Published var showingArrangerPanel: Bool = false
     @Published var showingTransposeDialog: Bool = false
+
+    // Cloud Catalog & Downloads
+    @Published var cloudCatalog: [CloudSong] = []
+    @Published var isLoadingCatalog: Bool = false
+    @Published var isDownloadingSong: Bool = false
+    @Published var downloadProgress: [String: Double] = [:]
 
     // Setlist & Song
     @Published var setlist: SetlistItem = MockSongData.defaultSetlist
@@ -299,6 +306,108 @@ final class ShowViewModel: ObservableObject {
         }
         currentUser = UserProfile(username: "invitado", role: .guest, avatar: "IN")
         isLoggedIn = false
+    }
+
+    // MARK: - Cloud Catalog & Song Downloading
+
+    /// Carga el catálogo de canciones disponibles en el servidor
+    func loadCloudCatalog() async {
+        isLoadingCatalog = true
+        do {
+            let songs = try await BackendAPIService.shared.fetchCatalog()
+            self.cloudCatalog = songs
+            self.isLoadingCatalog = false
+        } catch {
+            print("Error cargando catálogo en la nube: \(error)")
+            self.isLoadingCatalog = false
+        }
+    }
+
+    /// Descarga los stems de una canción desde el CDN y la agrega al setlist activo
+    func downloadAndAddSong(_ cloudSong: CloudSong) {
+        guard !isDownloadingSong else { return }
+        isDownloadingSong = true
+        downloadProgress[cloudSong.id] = 0.05
+
+        Task {
+            do {
+                let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let folderName = cloudSong.extractedFolder ?? cloudSong.title.replacingOccurrences(of: " ", with: "_")
+                let songDir = docDir.appendingPathComponent("Songs").appendingPathComponent(folderName)
+                try FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
+
+                var downloadedStems: [StemItem] = []
+                let stemsList = cloudSong.stems ?? []
+                let total = Double(max(stemsList.count, 1))
+
+                for (index, stem) in stemsList.enumerated() {
+                    let stemName = stem.filename ?? stem.original ?? "\(stem.id).mp3"
+                    let localStemURL = songDir.appendingPathComponent(stemName)
+
+                    if let urlString = stem.url, let remoteURL = URL(string: urlString) {
+                        if !FileManager.default.fileExists(atPath: localStemURL.path) {
+                            try await BackendAPIService.shared.downloadStem(from: remoteURL, to: localStemURL)
+                        }
+                    }
+
+                    let progress = Double(index + 1) / total
+                    self.downloadProgress[cloudSong.id] = progress
+
+                    // Determinar categoría y color
+                    let cat = (stem.category ?? "other").lowercased()
+                    let bus = (cat == "click" || cat == "guide") ? 1 : 0
+                    let colorHex: String
+                    switch cat {
+                    case "click": colorHex = "#9297A0"
+                    case "guide": colorHex = "#F0A028"
+                    case "drums": colorHex = "#FF4B33"
+                    case "bass": colorHex = "#3DDC84"
+                    case "keys", "piano": colorHex = "#4DA6FF"
+                    case "pad": colorHex = "#B388FF"
+                    case "guitars": colorHex = "#FFBE55"
+                    default: colorHex = "#C3C7CC"
+                    }
+
+                    downloadedStems.append(StemItem(
+                        id: stem.id,
+                        label: stem.label ?? stem.id.uppercased(),
+                        category: cat,
+                        colorHex: colorHex,
+                        bus: bus,
+                        gainDb: 0.0
+                    ))
+                }
+
+                // Crear SongItem nativo
+                let newSong = SongItem(
+                    id: cloudSong.id,
+                    title: cloudSong.title,
+                    artist: cloudSong.artist ?? "Desconocido",
+                    bpm: cloudSong.bpm ?? 120.0,
+                    key: cloudSong.key ?? "C",
+                    timeSignature: "4/4",
+                    durationSeconds: 270.0,
+                    stems: downloadedStems,
+                    sections: [
+                        SectionItem(id: 1, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.amber),
+                        SectionItem(id: 2, name: "VERSO", startBar: 9, lengthBars: 8, color: Color(hexString: "#26a69a")),
+                        SectionItem(id: 3, name: "CORO", startBar: 17, lengthBars: 8, color: Color(hexString: "#ef5350"))
+                    ],
+                    coverUrl: cloudSong.cover
+                )
+
+                if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title == newSong.title }) {
+                    self.setlist.songs.append(newSong)
+                }
+                self.currentSong = newSong
+                self.downloadProgress[cloudSong.id] = 1.0
+                self.isDownloadingSong = false
+            } catch {
+                print("Error descargando canción: \(error)")
+                self.isDownloadingSong = false
+                self.downloadProgress[cloudSong.id] = nil
+            }
+        }
     }
 
     // MARK: - Internal Simulation Clock (Active until Phase 2 AudioEngine attaches)

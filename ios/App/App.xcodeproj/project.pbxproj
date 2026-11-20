@@ -29,6 +29,7 @@
 		F42000000000000000000022 /* ArrangerSubmenuPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000022; };
 		F42000000000000000000023 /* TransposeDialogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000023; };
 		F42000000000000000000024 /* BackendAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000024; };
+		F42000000000000000000025 /* CloudCatalogModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000025; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +58,7 @@
 		F41000000000000000000022 /* ArrangerSubmenuPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ArrangerSubmenuPanel.swift"; sourceTree = "<group>"; };
 		F41000000000000000000023 /* TransposeDialogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/TransposeDialogView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000024 /* BackendAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/BackendAPIService.swift"; sourceTree = "<group>"; };
+		F41000000000000000000025 /* CloudCatalogModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/CloudCatalogModalView.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -105,6 +107,7 @@
 				F41000000000000000000022 /* ArrangerSubmenuPanel.swift */,
 				F41000000000000000000023 /* TransposeDialogView.swift */,
 				F41000000000000000000024 /* BackendAPIService.swift */,
+				F41000000000000000000025 /* CloudCatalogModalView.swift */,
 				F41000000000000000000004 /* FullPulsoView.swift */,
 				F41000000000000000000002 /* pulso_engine.cpp */,
 				F41000000000000000000003 /* pulso_mixer_simd.cpp */,
@@ -208,6 +211,7 @@
 				F42000000000000000000022 /* ArrangerSubmenuPanel.swift in Sources */,
 				F42000000000000000000023 /* TransposeDialogView.swift in Sources */,
 				F42000000000000000000024 /* BackendAPIService.swift in Sources */,
+				F42000000000000000000025 /* CloudCatalogModalView.swift in Sources */,
 				F42000000000000000000002 /* pulso_engine.cpp in Sources */,
 				F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,

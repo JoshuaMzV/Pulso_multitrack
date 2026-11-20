@@ -19,6 +19,18 @@ struct PulsoRootView: View {
                 }
             }
 
+            // Cloud Catalog Modal ("CATÁLOGO DE MULTITRACKS EN LA NUBE")
+            if vm.showingCloudCatalogModal {
+                CloudCatalogModalView(vm: vm)
+                    .transition(.opacity)
+            }
+
+            // Add Song Choice Modal (Nube vs Local)
+            if vm.showingAddSongModal {
+                AddSongChoiceModalView(vm: vm)
+                    .transition(.opacity)
+            }
+
             // Auth Modal ("ACCESO PULSO")
             if vm.showingAuthModal {
                 AuthModalView(vm: vm)
@@ -26,6 +38,8 @@ struct PulsoRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: vm.showingAuthModal)
+        .animation(.easeInOut(duration: 0.2), value: vm.showingCloudCatalogModal)
+        .animation(.easeInOut(duration: 0.2), value: vm.showingAddSongModal)
         .background(PulsoTheme.bg.ignoresSafeArea())
     }
 }
