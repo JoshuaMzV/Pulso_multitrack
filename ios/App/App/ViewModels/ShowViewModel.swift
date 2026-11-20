@@ -59,6 +59,8 @@ final class ShowViewModel: ObservableObject {
 
     // Master & Pad
     @Published var masterDb: Float = 0.0
+    @Published var masterRmsL: Float = 0.0
+    @Published var masterRmsR: Float = 0.0
     @Published var padActive: Bool = false
     @Published var padKey: String = "Bb"
 
@@ -154,6 +156,8 @@ final class ShowViewModel: ObservableObject {
         for i in stems.indices {
             stems[i].rms = 0.0
         }
+        masterRmsL = 0.0
+        masterRmsR = 0.0
     }
 
     func jumpToSection(index: Int) {
@@ -266,11 +270,15 @@ final class ShowViewModel: ObservableObject {
                 // Animate meters slightly for visual feedback
                 for i in self.stems.indices {
                     if !self.stems[i].muted {
-                        self.stems[i].rms = Float.random(in: 0.2...0.85)
+                        let gainLinear = pow(10.0, self.stems[i].gainDb / 20.0)
+                        self.stems[i].rms = Float.random(in: 0.3...0.85) * min(1.2, gainLinear)
                     } else {
                         self.stems[i].rms = 0.0
                     }
                 }
+                let masterLinear = pow(10.0, self.masterDb / 20.0)
+                self.masterRmsL = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
+                self.masterRmsR = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
             }
         }
     }

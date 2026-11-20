@@ -379,49 +379,41 @@ struct EditionView: View {
     }
 
     private var arrangerSectionsBandView: some View {
-        HStack(spacing: 0) {
-            Text("ARRANGER")
-                .font(.system(size: 8, weight: .heavy, design: .monospaced))
-                .foregroundColor(PulsoTheme.mut)
-                .frame(width: 64, alignment: .leading)
-                .padding(.leading, 8)
+        GeometryReader { geo in
+            let totalBars: CGFloat = 96.0
+            let bandWidth = geo.size.width
 
-            GeometryReader { geo in
-                let totalBars: CGFloat = 96.0
-                let bandWidth = geo.size.width
+            ZStack(alignment: .leading) {
+                ForEach(vm.currentSong.sections) { sec in
+                    let leftPct = CGFloat(sec.startBar - 1) / totalBars
+                    let widthPct = CGFloat(sec.lengthBars) / totalBars
+                    let xPos = leftPct * bandWidth
+                    let secWidth = max(24.0, widthPct * bandWidth)
 
-                ZStack(alignment: .leading) {
-                    ForEach(vm.currentSong.sections) { sec in
-                        let leftPct = CGFloat(sec.startBar - 1) / totalBars
-                        let widthPct = CGFloat(sec.lengthBars) / totalBars
-                        let xPos = leftPct * bandWidth
-                        let secWidth = max(24.0, widthPct * bandWidth)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(sec.color.opacity(0.22))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(sec.color.opacity(0.8), lineWidth: 1)
+                            )
 
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(sec.color.opacity(0.22))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .stroke(sec.color.opacity(0.8), lineWidth: 1)
-                                )
-
-                            Text(sec.name)
-                                .font(.system(size: 8, weight: .black, design: .monospaced))
-                                .foregroundColor(sec.color)
-                                .lineLimit(1)
-                                .padding(.horizontal, 2)
-                        }
-                        .frame(width: secWidth, height: 15)
-                        .offset(x: xPos)
-                        .onTapGesture {
-                            if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
-                                vm.jumpToSection(index: idx)
-                            }
+                        Text(sec.name)
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(sec.color)
+                            .lineLimit(1)
+                            .padding(.horizontal, 2)
+                    }
+                    .frame(width: secWidth, height: 16)
+                    .offset(x: xPos)
+                    .onTapGesture {
+                        if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
+                            vm.jumpToSection(index: idx)
                         }
                     }
                 }
-                .frame(width: bandWidth, height: geo.size.height)
             }
+            .frame(width: bandWidth, height: geo.size.height)
         }
     }
 
@@ -475,24 +467,43 @@ struct EditionView: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
-            // Horizontal rack of mixer channels + Master
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(vm.stems) { stem in
-                        EditionMixerChannelStrip(
-                            stem: stem,
-                            isSelected: stem.id == vm.selectedTrackId,
-                            vm: vm
-                        )
-                        .onTapGesture {
-                            vm.selectTrack(id: stem.id)
+            // Horizontal rack of mixer channels with STICKY Master overlay (traspasa y flota encima como en navegador)
+            ZStack(alignment: .trailing) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(vm.stems) { stem in
+                            EditionMixerChannelStrip(
+                                stem: stem,
+                                isSelected: stem.id == vm.selectedTrackId,
+                                vm: vm
+                            )
+                            .onTapGesture {
+                                vm.selectTrack(id: stem.id)
+                            }
                         }
                     }
-
-                    // Master Channel Strip
-                    MasterMixerChannelStrip(vm: vm)
+                    .padding(.leading, 14)
+                    .padding(.trailing, 96) // Espacio para que el último stem no quede tapado por Master
+                    .padding(.bottom, 10)
                 }
-                .padding(.horizontal, 14)
+
+                // Canal Master flotante sticky a la derecha
+                HStack(spacing: 0) {
+                    // Sombra degradada para difuminar los stems que pasan por debajo
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.black.opacity(0.0),
+                            Color.black.opacity(0.6),
+                            PulsoTheme.cardBg
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 18)
+
+                    MasterMixerChannelStrip(vm: vm)
+                        .padding(.trailing, 10)
+                }
                 .padding(.bottom, 10)
             }
         }
@@ -598,21 +609,26 @@ struct EditionMixerChannelStrip: View {
                 .lineLimit(1)
                 .frame(width: 58)
 
-            // EQ Button
-            Button(action: {}) {
-                Text("EQ")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(PulsoTheme.ink2)
+            // EQ Button (No aparece en CLICK y GUIDE)
+            if stem.id == "click" || stem.id == "guide" {
+                Color.clear
                     .frame(width: 34, height: 18)
-                    .background(PulsoTheme.raise)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(PulsoTheme.line2, lineWidth: 1)
-                    )
-                    .cornerRadius(3)
+            } else {
+                Button(action: {}) {
+                    Text("EQ")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(PulsoTheme.ink2)
+                        .frame(width: 34, height: 18)
+                        .background(PulsoTheme.raise)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(PulsoTheme.line2, lineWidth: 1)
+                        )
+                        .cornerRadius(3)
+                }
             }
 
-            // Fader with Scale Markings (+10, 0, -60)
+            // Fader with Scale Markings (+10, 0, -60) + Medidor VU
             HStack(spacing: 3) {
                 // Scale markings
                 VStack {
@@ -630,6 +646,9 @@ struct EditionMixerChannelStrip: View {
                 }
                 .frame(height: 120)
 
+                // Medidor VU de audio por pista
+                FaderVUMeterView(level: stem.rms)
+
                 // Vertical Tactile Fader
                 VerticalFaderBar(value: Binding(
                     get: { stem.gainDb },
@@ -638,7 +657,7 @@ struct EditionMixerChannelStrip: View {
                 .frame(width: 28, height: 120)
             }
 
-            // Mute & Solo
+            // Mute & Solo (Click solo tiene Mute)
             HStack(spacing: 4) {
                 Button(action: { vm.toggleMute(id: stem.id) }) {
                     Text("M")
@@ -649,13 +668,18 @@ struct EditionMixerChannelStrip: View {
                         .cornerRadius(3)
                 }
 
-                Button(action: { vm.toggleSolo(id: stem.id) }) {
-                    Text("S")
-                        .font(.system(size: 9, weight: .black))
-                        .foregroundColor(stem.solo ? Color(hex: 0x111111) : PulsoTheme.textDim)
+                if stem.id == "click" {
+                    Color.clear
                         .frame(width: 22, height: 18)
-                        .background(stem.solo ? PulsoTheme.amber : PulsoTheme.raise)
-                        .cornerRadius(3)
+                } else {
+                    Button(action: { vm.toggleSolo(id: stem.id) }) {
+                        Text("S")
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundColor(stem.solo ? Color(hex: 0x111111) : PulsoTheme.textDim)
+                            .frame(width: 22, height: 18)
+                            .background(stem.solo ? PulsoTheme.amber : PulsoTheme.raise)
+                            .cornerRadius(3)
+                    }
                 }
             }
 
@@ -704,7 +728,7 @@ struct MasterMixerChannelStrip: View {
                     .cornerRadius(3)
             }
 
-            // Fader with Scale Markings
+            // Fader with Scale Markings + Medidor Estéreo Master (L y R)
             HStack(spacing: 3) {
                 VStack {
                     Text("+10")
@@ -720,6 +744,9 @@ struct MasterMixerChannelStrip: View {
                         .foregroundColor(PulsoTheme.dim)
                 }
                 .frame(height: 120)
+
+                // Medidor Estéreo L/R Master
+                FaderVUMeterView(level: vm.masterRmsL, isStereo: true, levelR: vm.masterRmsR)
 
                 VerticalFaderBar(value: $vm.masterDb)
                     .frame(width: 28, height: 120)

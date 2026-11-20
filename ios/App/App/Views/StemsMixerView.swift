@@ -149,6 +149,7 @@ struct StemChannelStrip: View {
 
 struct VerticalFaderBar: View {
     @Binding var value: Float
+    @State private var lastTapTime: Date = .distantPast
 
     var body: some View {
         GeometryReader { geo in
@@ -194,9 +195,79 @@ struct VerticalFaderBar: View {
                         let clamped = max(0.0, min(1.0, Float(fraction)))
                         value = (clamped * 70.0) - 60.0
                     }
+                    .onEnded { drag in
+                        if abs(drag.translation.height) < 5 && abs(drag.translation.width) < 5 {
+                            let now = Date()
+                            if now.timeIntervalSince(lastTapTime) < 0.4 {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    value = 0.0
+                                }
+                                lastTapTime = .distantPast
+                            } else {
+                                lastTapTime = now
+                            }
+                        }
+                    }
             )
-            .onTapGesture(count: 2) {
-                value = 0.0
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        value = 0.0
+                    }
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Fader VU Meter View (20 segmented LED bar)
+
+struct FaderVUMeterView: View {
+    let level: Float // 0.0 to 1.0
+    var isStereo: Bool = false
+    var levelR: Float = 0.0
+
+    private let segCount = 20
+
+    var body: some View {
+        if isStereo {
+            HStack(spacing: 1.5) {
+                meterColumn(lvl: level)
+                meterColumn(lvl: levelR)
+            }
+            .padding(1.5)
+            .frame(width: 15, height: 120)
+            .background(Color(hex: 0x0D0B09))
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(PulsoTheme.line2, lineWidth: 0.5)
+            )
+            .cornerRadius(2)
+        } else {
+            meterColumn(lvl: level)
+                .padding(1.5)
+                .frame(width: 8, height: 120)
+                .background(Color(hex: 0x0D0B09))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(PulsoTheme.line2, lineWidth: 0.5)
+                )
+                .cornerRadius(2)
+        }
+    }
+
+    private func meterColumn(lvl: Float) -> some View {
+        VStack(spacing: 1.5) {
+            ForEach((0..<segCount).reversed(), id: \.self) { idx in
+                let litThreshold = Float(idx) / Float(segCount)
+                let isLit = lvl > litThreshold
+                let isRed = idx >= segCount - 3
+                let litColor = isRed ? PulsoTheme.red : PulsoTheme.amber
+                let unlitColor = Color(hex: 0x1A1816)
+
+                RoundedRectangle(cornerRadius: 0.5)
+                    .fill(isLit ? litColor : unlitColor)
+                    .frame(height: 4)
             }
         }
     }
