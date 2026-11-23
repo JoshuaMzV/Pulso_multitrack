@@ -149,12 +149,20 @@ struct StemChannelStrip: View {
 
 struct VerticalFaderBar: View {
     @Binding var value: Float
-    @State private var lastTapTime: Date = .distantPast
+    var onDragUpdate: ((Float) -> Void)? = nil
+    var onDragEnd: ((Float) -> Void)? = nil
+
+    @State private var internalValue: Float? = nil
+    @State private var isDragging: Bool = false
+
+    private var displayValue: Float {
+        internalValue ?? value
+    }
 
     var body: some View {
         GeometryReader { geo in
             let totalHeight = geo.size.height
-            let normalized = max(0, min(1, (value + 60.0) / 70.0))
+            let normalized = max(0.0, min(1.0, (displayValue + 60.0) / 70.0))
             let capY = totalHeight * (1.0 - CGFloat(normalized))
 
             ZStack(alignment: .top) {
@@ -174,45 +182,50 @@ struct VerticalFaderBar: View {
                 // Tactile Fader Cap
                 ZStack {
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(PulsoTheme.raiseHover)
+                        .fill(isDragging ? PulsoTheme.amber : PulsoTheme.raiseHover)
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
-                                .stroke(PulsoTheme.line2, lineWidth: 1)
+                                .stroke(isDragging ? PulsoTheme.amberGlow : PulsoTheme.line2, lineWidth: 1)
                         )
                     Rectangle()
-                        .fill(PulsoTheme.amber)
+                        .fill(isDragging ? Color.white : PulsoTheme.amber)
                         .frame(height: 2)
                 }
                 .frame(width: 28, height: 18)
                 .position(x: geo.size.width / 2, y: max(9, min(totalHeight - 9, capY)))
+                .shadow(color: isDragging ? PulsoTheme.amberGlow.opacity(0.5) : Color.clear, radius: 4)
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
+                        isDragging = true
                         let locationY = drag.location.y
                         let fraction = 1.0 - (locationY / totalHeight)
                         let clamped = max(0.0, min(1.0, Float(fraction)))
-                        value = (clamped * 70.0) - 60.0
+                        let computedDb = (clamped * 70.0) - 60.0
+                        internalValue = computedDb
+                        onDragUpdate?(computedDb)
                     }
-                    .onEnded { drag in
-                        if abs(drag.translation.height) < 5 && abs(drag.translation.width) < 5 {
-                            let now = Date()
-                            if now.timeIntervalSince(lastTapTime) < 0.4 {
-                                withAnimation(.easeOut(duration: 0.15)) {
-                                    value = 0.0
-                                }
-                                lastTapTime = .distantPast
-                            } else {
-                                lastTapTime = now
-                            }
+                    .onEnded { _ in
+                        isDragging = false
+                        if let finalVal = internalValue {
+                            value = finalVal
+                            onDragEnd?(finalVal)
                         }
+                        internalValue = nil
                     }
             )
             .simultaneousGesture(
                 TapGesture(count: 2).onEnded {
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                         value = 0.0
+                        internalValue = 0.0
+                    }
+                    onDragUpdate?(0.0)
+                    onDragEnd?(0.0)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        internalValue = nil
                     }
                 }
             )
@@ -220,7 +233,7 @@ struct VerticalFaderBar: View {
     }
 }
 
-// MARK: - Fader VU Meter View (20 segmented LED bar)
+// MARK: - Ultra-efficient GPU Canvas VU Meter
 
 struct FaderVUMeterView: View {
     let level: Float // 0.0 to 1.0
@@ -232,8 +245,8 @@ struct FaderVUMeterView: View {
     var body: some View {
         if isStereo {
             HStack(spacing: 1.5) {
-                meterColumn(lvl: level)
-                meterColumn(lvl: levelR)
+                meterCanvas(lvl: level)
+                meterCanvas(lvl: levelR)
             }
             .padding(1.5)
             .frame(width: 15, height: 120)
@@ -244,7 +257,7 @@ struct FaderVUMeterView: View {
             )
             .cornerRadius(2)
         } else {
-            meterColumn(lvl: level)
+            meterCanvas(lvl: level)
                 .padding(1.5)
                 .frame(width: 8, height: 120)
                 .background(Color(hex: 0x0D0B09))
@@ -256,18 +269,22 @@ struct FaderVUMeterView: View {
         }
     }
 
-    private func meterColumn(lvl: Float) -> some View {
-        VStack(spacing: 1.5) {
-            ForEach((0..<segCount).reversed(), id: \.self) { idx in
-                let litThreshold = Float(idx) / Float(segCount)
-                let isLit = lvl > litThreshold
-                let isRed = idx >= segCount - 3
-                let litColor = isRed ? PulsoTheme.red : PulsoTheme.amber
-                let unlitColor = Color(hex: 0x1A1816)
+    private func meterCanvas(lvl: Float) -> some View {
+        Canvas { context, size in
+            let segH: CGFloat = 4.0
+            let spacing: CGFloat = 1.5
+            let totalSegs = segCount
+            let colWidth = size.width
 
-                RoundedRectangle(cornerRadius: 0.5)
-                    .fill(isLit ? litColor : unlitColor)
-                    .frame(height: 4)
+            for i in 0..<totalSegs {
+                let y = size.height - CGFloat(i + 1) * (segH + spacing)
+                let threshold = Float(i) / Float(totalSegs)
+                let isLit = lvl > threshold
+                let isRed = i >= totalSegs - 3
+                let color = isLit ? (isRed ? Color(hex: 0xEF4444) : Color(hex: 0xF59E0B)) : Color(hex: 0x1A1816)
+
+                let rect = CGRect(x: 0, y: y, width: colWidth, height: segH)
+                context.fill(Path(roundedRect: rect, cornerRadius: 0.5), with: .color(color))
             }
         }
     }

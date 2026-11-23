@@ -41,11 +41,11 @@ struct AppHeaderView: View {
 
                     // Time Box (.hdr-time-box)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(formatTime(vm.currentSeconds))
+                        Text(vm.formattedPlaybackTime)
                             .font(.system(size: 13.5, weight: .heavy, design: .monospaced))
                             .foregroundColor(.white)
                             .lineLimit(1)
-                        Text("\(formatTime(vm.currentSeconds)) / \(formatTime(vm.currentSong.durationSeconds))")
+                        Text("\(vm.formattedPlaybackTime) / \(vm.formattedTotalDuration)")
                             .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                             .foregroundColor(PulsoTheme.amber)
                             .lineLimit(1)

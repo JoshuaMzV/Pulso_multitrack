@@ -17,10 +17,13 @@ final class MultitrackAudioEngine: ObservableObject {
     @Published var rmsLevels: [String: Float] = [:]
     @Published var masterRmsL: Float = 0.0
     @Published var masterRmsR: Float = 0.0
+    @Published var waveformPeaks: [String: [Float]] = [:]
+
+    var onSongDurationDetected: ((Double) -> Void)?
 
     private var playbackTimer: Timer?
     private var songDuration: Double = 240.0
-    private var startTimeHost: UInt64 = 0
+    private var startPlaybackWallTime: Double = 0.0
     private var startPlaybackSeconds: Double = 0.0
 
     private init() {
@@ -94,11 +97,64 @@ final class MultitrackAudioEngine: ObservableObject {
             if let o = stem.original {
                 candidateFilenames.append(o)
             }
-            candidateFilenames.append("\(stem.id).flac")
-            candidateFilenames.append("\(stem.id).mp3")
+            candidateFilenames.append("\(stem.label).wav")
+            candidateFilenames.append("\(stem.label).mp3")
+            candidateFilenames.append("\(stem.label).flac")
+            candidateFilenames.append("\(stem.label).m4a")
             candidateFilenames.append("\(stem.id).wav")
-            candidateFilenames.append("\(stem.label.lowercased()).mp3")
-            candidateFilenames.append("\(stem.label.lowercased()).flac")
+            candidateFilenames.append("\(stem.id).mp3")
+            candidateFilenames.append("\(stem.id).flac")
+            candidateFilenames.append("\(stem.id).m4a")
+
+            // Aliases específicos por categoría o etiqueta
+            let cat = stem.category.lowercased()
+            let lab = stem.label.lowercased()
+            if cat == "click" || lab.contains("click") {
+                candidateFilenames.append("Click Track.wav")
+                candidateFilenames.append("Click Track.mp3")
+                candidateFilenames.append("Click Track.m4a")
+                candidateFilenames.append("Click.wav")
+                candidateFilenames.append("Click.mp3")
+            } else if cat == "drums" || lab.contains("drum") || lab.contains("bater") {
+                candidateFilenames.append("Drums (Live).wav")
+                candidateFilenames.append("Drums (Live).mp3")
+                candidateFilenames.append("Drums.wav")
+                candidateFilenames.append("Drums.mp3")
+                candidateFilenames.append("Bateria.mp3")
+            } else if cat == "keys" || lab.contains("key") || lab.contains("teclado") {
+                candidateFilenames.append("Keys 1.wav")
+                candidateFilenames.append("Keys 1.mp3")
+                candidateFilenames.append("Keys.wav")
+                candidateFilenames.append("Teclados 1.mp3")
+            } else if lab.contains("piano") {
+                candidateFilenames.append("Piano.wav")
+                candidateFilenames.append("Piano.mp3")
+            } else if cat == "pad" || lab.contains("pad") || lab.contains("string") {
+                candidateFilenames.append("Strings.wav")
+                candidateFilenames.append("Strings.mp3")
+                candidateFilenames.append("Pad.wav")
+                candidateFilenames.append("Pad.mp3")
+            } else if cat == "guitars" || lab.contains("eg") || lab.contains("guitar") {
+                candidateFilenames.append("EG 1.wav")
+                candidateFilenames.append("EG 2.wav")
+                candidateFilenames.append("EG 1.mp3")
+                candidateFilenames.append("EG 2.mp3")
+                candidateFilenames.append("Electrica 1.mp3")
+                candidateFilenames.append("Electrica 2.mp3")
+            } else if cat == "bass" || lab.contains("bajo") {
+                candidateFilenames.append("Bass.wav")
+                candidateFilenames.append("Bass.mp3")
+                candidateFilenames.append("Bajo.mp3")
+            } else if cat == "guide" || lab.contains("guia") || lab.contains("gu\u{00ed}a") {
+                candidateFilenames.append("Guide.wav")
+                candidateFilenames.append("Guide.mp3")
+            } else if lab.contains("horn") || lab.contains("metal") {
+                candidateFilenames.append("Horns.wav")
+                candidateFilenames.append("Horns.mp3")
+            } else if lab.contains("loop") {
+                candidateFilenames.append("Loop.wav")
+                candidateFilenames.append("Loop.mp3")
+            }
 
             var fileURL: URL?
             for candidate in candidateFilenames {
@@ -122,7 +178,10 @@ final class MultitrackAudioEngine: ObservableObject {
                 }
             }
 
-            guard let url = fileURL else { continue }
+            guard let url = fileURL else {
+                print("[PULSO AUDIO] Archivo no encontrado para stem \(stem.label) (\(stem.id))")
+                continue
+            }
 
             do {
                 let audioFile = try AVAudioFile(forReading: url)
@@ -153,16 +212,27 @@ final class MultitrackAudioEngine: ObservableObject {
 
                 playerNodes[stem.id] = playerNode
                 audioFiles[stem.id] = audioFile
-                durationPerStem[stem.id] = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                let durationSeconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                durationPerStem[stem.id] = durationSeconds
 
                 // Aplicar ganancia inicial
                 updateVolume(stem: stem, soloActive: false)
+
+                // Extraer forma de onda real en segundo plano
+                extractWaveformPeaks(stemId: stem.id, file: audioFile)
             } catch {
                 print("[PULSO AUDIO] Error cargando pista \(stem.label) (\(url.lastPathComponent)): \(error)")
             }
         }
 
         self.hasLoadedTracks = !playerNodes.isEmpty
+
+        // Detección precisa de la duración máxima de los stems
+        if let maxDuration = durationPerStem.values.max(), maxDuration > 1.0 {
+            self.songDuration = maxDuration
+            self.onSongDurationDetected?(maxDuration)
+            print("[PULSO AUDIO] Duración real detectada de pistas: \(String(format: "%.1f", maxDuration)) segundos.")
+        }
 
         // Iniciar el motor de audio si está listo
         if hasLoadedTracks {
@@ -205,7 +275,7 @@ final class MultitrackAudioEngine: ObservableObject {
 
             self.isPlaying = true
             self.startPlaybackSeconds = currentSeconds
-            self.startTimeHost = mach_absolute_time()
+            self.startPlaybackWallTime = ProcessInfo.processInfo.systemUptime
 
             startClockTimer()
         } catch {
@@ -229,6 +299,7 @@ final class MultitrackAudioEngine: ObservableObject {
         }
         self.isPlaying = false
         self.currentSeconds = 0.0
+        self.startPlaybackWallTime = 0.0
         stopClockTimer()
 
         for key in rmsLevels.keys {
@@ -242,9 +313,22 @@ final class MultitrackAudioEngine: ObservableObject {
     func seek(to seconds: Double) {
         let clamped = max(0.0, min(songDuration, seconds))
         self.currentSeconds = clamped
+        self.startPlaybackSeconds = clamped
+        self.startPlaybackWallTime = ProcessInfo.processInfo.systemUptime
 
         if isPlaying {
             play()
+        }
+    }
+
+    /// Actualización directa de volumen para fader de alta fluidez (sin latencia de bindings)
+    func updateVolumeDirect(stemId: String, gainDb: Float, muted: Bool, solo: Bool, anySolo: Bool) {
+        guard let node = playerNodes[stemId] else { return }
+        if muted || (anySolo && !solo) {
+            node.volume = 0.0
+        } else {
+            let gain = pow(10.0, gainDb / 20.0)
+            node.volume = Float(gain)
         }
     }
 
@@ -269,12 +353,69 @@ final class MultitrackAudioEngine: ObservableObject {
         engine.mainMixerNode.outputVolume = Float(gain)
     }
 
+    /// Extrae los peaks reales de amplitud PCM para representar la forma de onda
+    private func extractWaveformPeaks(stemId: String, file: AVAudioFile, targetPoints: Int = 220) {
+        Task.detached(priority: .utility) {
+            let totalFrames = file.length
+            guard totalFrames > 0 else {
+                await MainActor.run { [weak self] in
+                    self?.waveformPeaks[stemId] = []
+                }
+                return
+            }
+
+            let framesPerSegment = max(1, totalFrames / Int64(targetPoints))
+            let chunkSize = AVAudioFrameCount(min(framesPerSegment, 1024))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunkSize) else {
+                return
+            }
+
+            var peaks: [Float] = []
+            peaks.reserveCapacity(targetPoints)
+
+            let originalPos = file.framePosition
+
+            for i in 0..<targetPoints {
+                let framePos = min(totalFrames - Int64(chunkSize), Int64(i) * framesPerSegment)
+                file.framePosition = max(0, framePos)
+
+                do {
+                    try file.read(into: buffer, frameCount: chunkSize)
+                    guard let channelData = buffer.floatChannelData else {
+                        peaks.append(0.0)
+                        continue
+                    }
+                    let count = Int(buffer.frameLength)
+                    var maxAmp: Float = 0.0
+                    let ptr = channelData[0]
+                    for j in 0..<count {
+                        let absVal = abs(ptr[j])
+                        if absVal > maxAmp { maxAmp = absVal }
+                    }
+                    peaks.append(min(1.0, maxAmp * 1.6))
+                } catch {
+                    peaks.append(0.0)
+                }
+            }
+
+            file.framePosition = originalPos
+
+            await MainActor.run { [weak self] in
+                self?.waveformPeaks[stemId] = peaks
+            }
+        }
+    }
+
     private func startClockTimer() {
         stopClockTimer()
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isPlaying else { return }
-                self.currentSeconds += 0.04
+
+                // Cálculo exacto a partir del reloj de tiempo del sistema
+                let now = ProcessInfo.processInfo.systemUptime
+                let elapsed = now - self.startPlaybackWallTime
+                self.currentSeconds = min(self.songDuration, self.startPlaybackSeconds + elapsed)
 
                 if self.currentSeconds >= self.songDuration {
                     self.stop()

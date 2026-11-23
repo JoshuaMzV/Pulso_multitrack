@@ -13,12 +13,31 @@ struct SectionItem: Identifiable, Hashable, Codable {
         Color(hexString: colorHex)
     }
 
-    init(id: Int, name: String, startBar: Int, lengthBars: Int, color: Color) {
+    var shortName: String {
+        let upper = name.uppercased().trimmingCharacters(in: .whitespaces)
+        switch upper {
+        case "INTRO": return "I"
+        case "VERSO", "VERSE": return "V"
+        case "PRECORO", "PRE-CHORUS", "PRE CORO": return "PC"
+        case "CORO", "CHORUS": return "C"
+        case "PUENTE", "BRIDGE": return "P"
+        case "INSTRUMENTAL": return "INS"
+        case "INTERLUDIO": return "INT"
+        case "FINAL", "OUTRO": return "F"
+        case "SOLO": return "S"
+        case "LEVÁNTATE", "LEVANTATE": return "LEV"
+        default:
+            let letters = upper.split(separator: " ").compactMap { $0.first }
+            return letters.isEmpty ? "SEC" : String(letters)
+        }
+    }
+
+    init(id: Int, name: String, startBar: Int, lengthBars: Int, color: Color = PulsoTheme.blue, colorHex: String = "#3B82F6") {
         self.id = id
         self.name = name
         self.startBar = startBar
         self.lengthBars = lengthBars
-        self.colorHex = "#3B82F6"
+        self.colorHex = colorHex
     }
 
     init(id: Int, name: String, startBar: Int, lengthBars: Int, colorHex: String = "#3B82F6") {
@@ -330,27 +349,27 @@ struct SetlistItem: Identifiable, Hashable, Codable {
 
 enum MockSongData {
     static let seOyeStems: [StemItem] = [
-        StemItem(id: "click", label: "CLICK", category: "click", colorHex: "#9297A0", bus: 1, gainDb: -1.5),
-        StemItem(id: "guide", label: "GUIDE", category: "guide", colorHex: "#F0A028", bus: 1, gainDb: -3.0),
-        StemItem(id: "drums", label: "DRUMS", category: "drums", colorHex: "#FF4B33", bus: 0, gainDb: 0.0),
-        StemItem(id: "bass", label: "BASS", category: "bass", colorHex: "#3DDC84", bus: 0, gainDb: 0.0),
-        StemItem(id: "keys", label: "KEYS", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0),
-        StemItem(id: "keys_2", label: "PIANO", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0),
-        StemItem(id: "pad", label: "PAD", category: "pad", colorHex: "#B388FF", bus: 0, gainDb: -4.0),
-        StemItem(id: "guitars", label: "EG 1", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5),
-        StemItem(id: "guitars_2", label: "EG 2", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5),
-        StemItem(id: "horns", label: "HORNS", category: "other", colorHex: "#C3C7CC", bus: 0, gainDb: -3.0),
-        StemItem(id: "loop", label: "LOOP", category: "other", colorHex: "#C3C7CC", bus: 0, gainDb: -3.0)
+        StemItem(id: "click", label: "CLICK", category: "click", colorHex: "#9297A0", bus: 1, gainDb: -1.5, filename: "Click Track.wav", original: "Click Track.wav"),
+        StemItem(id: "guide", label: "GUIDE", category: "guide", colorHex: "#F0A028", bus: 1, gainDb: -3.0, filename: "Guide.wav", original: "Guide.wav"),
+        StemItem(id: "drums", label: "DRUMS", category: "drums", colorHex: "#FF4B33", bus: 0, gainDb: 0.0, filename: "Drums (Live).wav", original: "Drums (Live).wav"),
+        StemItem(id: "bass", label: "BASS", category: "bass", colorHex: "#3DDC84", bus: 0, gainDb: 0.0, filename: "Bass.wav", original: "Bass.wav"),
+        StemItem(id: "keys", label: "KEYS", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Keys 1.wav", original: "Keys 1.wav"),
+        StemItem(id: "keys_2", label: "PIANO", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Piano.wav", original: "Piano.wav"),
+        StemItem(id: "pad", label: "PAD", category: "pad", colorHex: "#B388FF", bus: 0, gainDb: -4.0, filename: "Strings.wav", original: "Strings.wav"),
+        StemItem(id: "guitars", label: "EG 1", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5, filename: "EG 1.wav", original: "EG 1.wav"),
+        StemItem(id: "guitars_2", label: "EG 2", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5, filename: "EG 2.wav", original: "EG 2.wav"),
+        StemItem(id: "horns", label: "HORNS", category: "other", colorHex: "#C3C7CC", bus: 0, gainDb: -3.0, filename: "Horns.wav", original: "Horns.wav"),
+        StemItem(id: "loop", label: "LOOP", category: "other", colorHex: "#C3C7CC", bus: 0, gainDb: -3.0, filename: "Loop.wav", original: "Loop.wav")
     ]
 
     static let seOyeSections: [SectionItem] = [
-        SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.blue),
-        SectionItem(id: 1, name: "LEVÁNTATE", startBar: 9, lengthBars: 8, color: PulsoTheme.teal),
-        SectionItem(id: 2, name: "VERSO", startBar: 17, lengthBars: 8, color: PulsoTheme.teal),
-        SectionItem(id: 3, name: "PRECORO", startBar: 25, lengthBars: 8, color: PulsoTheme.amber),
-        SectionItem(id: 4, name: "CORO", startBar: 33, lengthBars: 12, color: PulsoTheme.red),
-        SectionItem(id: 5, name: "PUENTE", startBar: 45, lengthBars: 8, color: PulsoTheme.purple),
-        SectionItem(id: 6, name: "FINAL", startBar: 53, lengthBars: 8, color: PulsoTheme.textDim)
+        SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.blue, colorHex: "#3B82F6"),
+        SectionItem(id: 1, name: "LEVÁNTATE", startBar: 9, lengthBars: 8, color: PulsoTheme.teal, colorHex: "#14B8A6"),
+        SectionItem(id: 2, name: "VERSO", startBar: 17, lengthBars: 8, color: PulsoTheme.teal, colorHex: "#10B981"),
+        SectionItem(id: 3, name: "PRECORO", startBar: 25, lengthBars: 8, color: PulsoTheme.amber, colorHex: "#F59E0B"),
+        SectionItem(id: 4, name: "CORO", startBar: 33, lengthBars: 12, color: PulsoTheme.red, colorHex: "#EF4444"),
+        SectionItem(id: 5, name: "PUENTE", startBar: 45, lengthBars: 8, color: PulsoTheme.purple, colorHex: "#8B5CF6"),
+        SectionItem(id: 6, name: "FINAL", startBar: 53, lengthBars: 8, color: PulsoTheme.textDim, colorHex: "#6B7280")
     ]
 
     static let song1 = SongItem(

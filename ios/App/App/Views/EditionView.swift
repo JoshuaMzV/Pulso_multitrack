@@ -354,13 +354,13 @@ struct EditionView: View {
             VStack(spacing: 0) {
                 // Arranger Sections Band (.tl-band de Pulso Web)
                 arrangerSectionsBandView
-                    .frame(height: 18)
+                    .frame(height: 26)
                     .background(Color(hex: 0x1A1714))
                     .border(PulsoTheme.line, width: 0.5)
 
                 // Time Ruler (Bars 1, 5, 9, 13, ...)
                 timeRulerView
-                    .frame(height: 20)
+                    .frame(height: 22)
                     .background(PulsoTheme.blackBox)
                     .border(PulsoTheme.line, width: 0.5)
 
@@ -389,8 +389,8 @@ struct EditionView: View {
                         .frame(width: geo.size.width, height: totalHeight)
 
                         // Playhead vertical line
-                        let pct = vm.currentSong.durationSeconds > 0 ?
-                            CGFloat(vm.currentSeconds / vm.currentSong.durationSeconds) : 0
+                        let dur = max(1.0, vm.currentSong.durationSeconds)
+                        let pct = CGFloat(max(0.0, min(1.0, vm.currentSeconds / dur)))
                         let xPos = 64.0 + (geo.size.width - 64.0) * pct
 
                         Rectangle()
@@ -409,7 +409,7 @@ struct EditionView: View {
                         }
                     }
                     .gesture(
-                        DragGesture(minimumDistance: 4)
+                        DragGesture(minimumDistance: 1)
                             .onChanged { value in
                                 let touchX = value.location.x
                                 if touchX >= 64.0 {
@@ -436,37 +436,46 @@ struct EditionView: View {
 
     private var arrangerSectionsBandView: some View {
         HStack(spacing: 0) {
-            // Placeholder de 64px para alinear exactamente con los nombres de stems y la regla
-            Text("")
+            // Offset de 64pt para alinear exactamente con los nombres de stems y la regla
+            Color.clear
                 .frame(width: 64)
 
             GeometryReader { geo in
-                let totalBars: CGFloat = 96.0
                 let bandWidth = geo.size.width
+                let totBars = max(32.0, CGFloat(vm.totalSongBars))
 
                 ZStack(alignment: .leading) {
                     ForEach(vm.currentSong.sections) { sec in
-                        let leftPct = CGFloat(max(0, sec.startBar - 1)) / totalBars
-                        let widthPct = CGFloat(sec.lengthBars) / totalBars
+                        let leftPct = CGFloat(max(0, sec.startBar - 1)) / totBars
+                        let widthPct = CGFloat(sec.lengthBars) / totBars
                         let xPos = leftPct * bandWidth
-                        let secWidth = max(24.0, widthPct * bandWidth)
+                        let secWidth = max(22.0, widthPct * bandWidth)
+                        let isSelected = vm.activeSectionIndex == sec.id
 
                         ZStack {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(sec.color.opacity(0.22))
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(sec.color.opacity(0.2))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .stroke(sec.color.opacity(0.8), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(isSelected ? Color.white : sec.color.opacity(0.7), lineWidth: isSelected ? 1.5 : 1)
                                 )
 
-                            Text(sec.name)
-                                .font(.system(size: 8, weight: .black, design: .monospaced))
-                                .foregroundColor(sec.color)
-                                .lineLimit(1)
-                                .padding(.horizontal, 2)
+                            if secWidth > 55 {
+                                Text(sec.name)
+                                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                                    .foregroundColor(sec.color)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 2)
+                            } else {
+                                Text(sec.shortName)
+                                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                                    .foregroundColor(sec.color)
+                                    .lineLimit(1)
+                            }
                         }
-                        .frame(width: secWidth, height: 16)
-                        .offset(x: xPos)
+                        .frame(width: secWidth, height: 22)
+                        .position(x: xPos + secWidth / 2.0, y: geo.size.height / 2.0)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
                                 vm.jumpToSection(index: idx)
@@ -474,28 +483,42 @@ struct EditionView: View {
                         }
                     }
                 }
-                .frame(width: bandWidth, height: geo.size.height)
             }
         }
     }
 
     private var timeRulerView: some View {
         HStack(spacing: 0) {
-            // Track label placeholder offset
-            Text("")
+            Color.clear
                 .frame(width: 64)
 
-            // Numbered bar grid
-            HStack(spacing: 0) {
-                ForEach([1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81, 85, 89, 93], id: \.self) { bar in
-                    HStack(spacing: 2) {
-                        Text("\(bar)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(PulsoTheme.amber)
-                        Rectangle()
-                            .fill(PulsoTheme.line2)
-                            .frame(width: 1, height: 6)
-                        Spacer()
+            GeometryReader { geo in
+                let bandWidth = geo.size.width
+                let totBars = max(32.0, CGFloat(vm.totalSongBars))
+                let barWidth = bandWidth / totBars
+
+                Canvas { context, size in
+                    let totalB = Int(totBars)
+                    for barIndex in 0..<totalB {
+                        let x = CGFloat(barIndex) * barWidth
+                        let isMajor = (barIndex % 4 == 0) // Compás 1, 5, 9, 13...
+
+                        var linePath = Path()
+                        if isMajor {
+                            linePath.move(to: CGPoint(x: x, y: 0))
+                            linePath.addLine(to: CGPoint(x: x, y: size.height))
+                            context.stroke(linePath, with: .color(PulsoTheme.amber.opacity(0.5)), lineWidth: 1.0)
+
+                            let barNum = barIndex + 1
+                            let text = Text("\(barNum)")
+                                .font(.system(size: 9.5, weight: .heavy, design: .monospaced))
+                                .foregroundColor(PulsoTheme.amber)
+                            context.draw(context.resolve(text), at: CGPoint(x: x + 4, y: size.height / 2.0), anchor: .leading)
+                        } else {
+                            linePath.move(to: CGPoint(x: x, y: size.height - 6))
+                            linePath.addLine(to: CGPoint(x: x, y: size.height))
+                            context.stroke(linePath, with: .color(PulsoTheme.line2), lineWidth: 0.8)
+                        }
                     }
                 }
             }
@@ -605,14 +628,8 @@ struct TimelineTrackRow: View {
                 // Background of lane
                 Color.black.opacity(0.4)
 
-                // Continuous horizontal center baseline
-                Rectangle()
-                    .fill(Color(hex: 0x8C9298).opacity(0.35))
-                    .frame(height: 1)
-
-                // Monochrome Gray Waveform bars/envelope filling full lane
-                WaveformLaneShape(stemId: stem.id)
-                    .stroke(Color(hex: 0x8C9298), lineWidth: 1)
+                // Real audio waveform or flat line for silence
+                RealWaveformLaneView(stemId: stem.id)
                     .padding(.vertical, 2)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -623,39 +640,40 @@ struct TimelineTrackRow: View {
     }
 }
 
-// MARK: - Waveform Lane Shape (Mathematical Envelope Generator)
+// MARK: - Real PCM Waveform Lane View
 
-struct WaveformLaneShape: Shape {
+struct RealWaveformLaneView: View {
     let stemId: String
+    @ObservedObject private var engine = MultitrackAudioEngine.shared
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let step: CGFloat = 2.5
-        let midY = rect.midY
+    var body: some View {
+        Canvas { context, size in
+            let midY = size.height / 2.0
+            let maxH = max(2.0, (size.height / 2.0) - 2.0)
 
-        for x in stride(from: 0, to: rect.width, by: step) {
-            let ratio = Double(x / rect.width)
-            let baseEnv: Double
-            if stemId == "click" {
-                // Sharp periodic spikes
-                baseEnv = (Int(x) % 24 < 3) ? 0.85 : 0.04
-            } else if stemId == "drums" || stemId == "bass" {
-                // Dense rhythmic waveforms
-                baseEnv = 0.25 + 0.70 * abs(sin(ratio * 70.0) * cos(ratio * 35.0))
-            } else if stemId == "guide" {
-                // Sparse vocal cues
-                baseEnv = (sin(ratio * 18.0) > 0.35) ? 0.75 : 0.04
-            } else {
-                // Melodic instruments
-                baseEnv = 0.18 + 0.65 * abs(sin(ratio * 40.0))
+            // Línea central de referencia base
+            var baseline = Path()
+            baseline.move(to: CGPoint(x: 0, y: midY))
+            baseline.addLine(to: CGPoint(x: size.width, y: midY))
+            context.stroke(baseline, with: .color(Color(hex: 0x8C9298).opacity(0.35)), lineWidth: 1.0)
+
+            let peaks = engine.waveformPeaks[stemId] ?? []
+            guard !peaks.isEmpty else { return }
+
+            let count = peaks.count
+            let step = size.width / CGFloat(count)
+
+            var wavePath = Path()
+            for (idx, peak) in peaks.enumerated() {
+                let x = CGFloat(idx) * step
+                if peak > 0.02 {
+                    let amp = CGFloat(peak) * maxH
+                    wavePath.move(to: CGPoint(x: x, y: midY - amp))
+                    wavePath.addLine(to: CGPoint(x: x, y: midY + amp))
+                }
             }
-
-            let amp = CGFloat(baseEnv) * max(2.0, (rect.height / 2.0 - 2.0))
-            path.move(to: CGPoint(x: x, y: midY - amp))
-            path.addLine(to: CGPoint(x: x, y: midY + amp))
+            context.stroke(wavePath, with: .color(Color(hex: 0x8C9298)), lineWidth: 1.0)
         }
-
-        return path
     }
 }
 
@@ -665,6 +683,7 @@ struct EditionMixerChannelStrip: View {
     let stem: StemItem
     let isSelected: Bool
     @ObservedObject var vm: ShowViewModel
+    @ObservedObject private var engine = MultitrackAudioEngine.shared
 
     var body: some View {
         VStack(spacing: 5) {
@@ -714,13 +733,23 @@ struct EditionMixerChannelStrip: View {
                 .frame(height: 120)
 
                 // Medidor VU de audio por pista
-                FaderVUMeterView(level: stem.rms)
+                let stemRms = engine.rmsLevels[stem.id] ?? 0.0
+                FaderVUMeterView(level: stemRms)
 
                 // Vertical Tactile Fader
-                VerticalFaderBar(value: Binding(
-                    get: { stem.gainDb },
-                    set: { vm.setStemDb(id: stem.id, db: $0) }
-                ))
+                VerticalFaderBar(
+                    value: Binding(
+                        get: { stem.gainDb },
+                        set: { vm.setStemDb(id: stem.id, db: $0) }
+                    ),
+                    onDragUpdate: { newDb in
+                        let anySolo = vm.stems.contains(where: { $0.solo })
+                        engine.updateVolumeDirect(stemId: stem.id, gainDb: newDb, muted: stem.muted, solo: stem.solo, anySolo: anySolo)
+                    },
+                    onDragEnd: { finalDb in
+                        vm.setStemDb(id: stem.id, db: finalDb)
+                    }
+                )
                 .frame(width: 28, height: 120)
             }
 
@@ -770,6 +799,7 @@ struct EditionMixerChannelStrip: View {
 
 struct MasterMixerChannelStrip: View {
     @ObservedObject var vm: ShowViewModel
+    @ObservedObject private var engine = MultitrackAudioEngine.shared
 
     var body: some View {
         VStack(spacing: 5) {
@@ -813,10 +843,18 @@ struct MasterMixerChannelStrip: View {
                 .frame(height: 120)
 
                 // Medidor Estéreo L/R Master
-                FaderVUMeterView(level: vm.masterRmsL, isStereo: true, levelR: vm.masterRmsR)
+                FaderVUMeterView(level: engine.masterRmsL, isStereo: true, levelR: engine.masterRmsR)
 
-                VerticalFaderBar(value: $vm.masterDb)
-                    .frame(width: 28, height: 120)
+                VerticalFaderBar(
+                    value: $vm.masterDb,
+                    onDragUpdate: { newDb in
+                        engine.setMasterDb(newDb)
+                    },
+                    onDragEnd: { finalDb in
+                        vm.masterDb = finalDb
+                    }
+                )
+                .frame(width: 28, height: 120)
             }
 
             // Mute Button

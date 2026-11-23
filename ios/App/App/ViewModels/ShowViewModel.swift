@@ -107,10 +107,38 @@ final class ShowViewModel: ObservableObject {
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
 
+    var totalSongBars: Int {
+        let bpm = max(30.0, currentSong.bpm)
+        let secondsPerBar = (60.0 / bpm) * 4.0
+        return max(32, Int(ceil(currentSong.durationSeconds / secondsPerBar)))
+    }
+
+    var formattedPlaybackTime: String {
+        let s = Int(max(0, currentSeconds))
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    var formattedTotalDuration: String {
+        let s = Int(max(0, currentSong.durationSeconds))
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    var formattedRemainingTime: String {
+        let rem = max(0, currentSong.durationSeconds - currentSeconds)
+        let s = Int(rem)
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
     init() {
         self.loadSong(MockSongData.song1)
         self.checkSessionWithBackend()
         self.loadSetlistsFromBackend()
+
+        // Sincronizar duración real detectada desde archivos de audio en disco
+        MultitrackAudioEngine.shared.onSongDurationDetected = { [weak self] detectedDuration in
+            guard let self = self else { return }
+            self.currentSong.durationSeconds = detectedDuration
+        }
     }
 
     func selectTrack(id: String) {
@@ -314,10 +342,11 @@ final class ShowViewModel: ObservableObject {
     func seek(to seconds: Double) {
         let clamped = max(0.0, min(currentSong.durationSeconds, seconds))
         currentSeconds = clamped
-        let beatsPerSecond = currentSong.bpm / 60.0
-        let totalBeats = Int(currentSeconds * beatsPerSecond)
-        currentBar = (totalBeats / 4) + 1
-        currentBeat = (totalBeats % 4) + 1
+        let bpm = max(30.0, currentSong.bpm)
+        let secondsPerBeat = 60.0 / bpm
+        let totalBeats = max(0.0, clamped / secondsPerBeat)
+        currentBar = Int(totalBeats / 4.0) + 1
+        currentBeat = Int(totalBeats.truncatingRemainder(dividingBy: 4.0)) + 1
 
         for (idx, sec) in currentSong.sections.enumerated() {
             if currentBar >= sec.startBar && currentBar < (sec.startBar + sec.lengthBars) {
@@ -471,12 +500,15 @@ final class ShowViewModel: ObservableObject {
                 let total = Double(max(stemsList.count, 1))
 
                 for (index, stem) in stemsList.enumerated() {
-                    let stemName = stem.filename ?? stem.original ?? "\(stem.id).mp3"
+                    let stemName = stem.filename ?? stem.original ?? "\(stem.label ?? stem.id).wav"
                     let localStemURL = songDir.appendingPathComponent(stemName)
 
-                    if let urlString = stem.url, let remoteURL = URL(string: urlString) {
-                        if !FileManager.default.fileExists(atPath: localStemURL.path) {
-                            try await BackendAPIService.shared.downloadStem(from: remoteURL, to: localStemURL)
+                    if let urlString = stem.url {
+                        let safeUrlStr = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlString
+                        if let remoteURL = URL(string: safeUrlStr) ?? URL(string: urlString.replacingOccurrences(of: " ", with: "%20")) {
+                            if !FileManager.default.fileExists(atPath: localStemURL.path) {
+                                try await BackendAPIService.shared.downloadStem(from: remoteURL, to: localStemURL)
+                            }
                         }
                     }
 
@@ -504,8 +536,23 @@ final class ShowViewModel: ObservableObject {
                         category: cat,
                         colorHex: colorHex,
                         bus: bus,
-                        gainDb: 0.0
+                        gainDb: 0.0,
+                        filename: stemName,
+                        original: stem.original ?? stemName,
+                        url: stem.url
                     ))
+                }
+
+                // Obtener o inferir secciones correspondientes
+                let songSections: [SectionItem]
+                if cloudSong.title.lowercased().contains("se oye") || cloudSong.id.contains("se_oye") {
+                    songSections = MockSongData.seOyeSections
+                } else {
+                    songSections = [
+                        SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, colorHex: "#3B82F6"),
+                        SectionItem(id: 1, name: "VERSO", startBar: 9, lengthBars: 8, colorHex: "#10B981"),
+                        SectionItem(id: 2, name: "CORO", startBar: 17, lengthBars: 8, colorHex: "#EF4444")
+                    ]
                 }
 
                 // Crear SongItem nativo
@@ -516,14 +563,11 @@ final class ShowViewModel: ObservableObject {
                     bpm: cloudSong.bpm ?? 120.0,
                     key: cloudSong.key ?? "C",
                     timeSignature: "4/4",
-                    durationSeconds: 270.0,
+                    durationSeconds: self.currentSong.durationSeconds > 0 ? self.currentSong.durationSeconds : 265.0,
                     stems: downloadedStems,
-                    sections: [
-                        SectionItem(id: 1, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.amber),
-                        SectionItem(id: 2, name: "VERSO", startBar: 9, lengthBars: 8, color: Color(hexString: "#26a69a")),
-                        SectionItem(id: 3, name: "CORO", startBar: 17, lengthBars: 8, color: Color(hexString: "#ef5350"))
-                    ],
-                    coverUrl: cloudSong.cover
+                    sections: songSections,
+                    coverUrl: cloudSong.cover,
+                    folderId: folderName
                 )
 
                 if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title == newSong.title }) {
@@ -570,11 +614,12 @@ final class ShowViewModel: ObservableObject {
 
                 let total = Double(max(song.stems.count, 1))
                 for (idx, stem) in song.stems.enumerated() {
-                    let stemFilename = "\(stem.id).mp3"
+                    let stemFilename = stem.filename ?? stem.original ?? "\(stem.label).wav"
                     let localURL = songDir.appendingPathComponent(stemFilename)
                     if !FileManager.default.fileExists(atPath: localURL.path) {
                         let remoteURLStr = "\(BackendAPIService.shared.baseURL)/songs/extracted/\(folderName)/\(stemFilename)"
-                        if let remoteURL = URL(string: remoteURLStr) {
+                        let safeRemote = remoteURLStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? remoteURLStr
+                        if let remoteURL = URL(string: safeRemote) ?? URL(string: remoteURLStr.replacingOccurrences(of: " ", with: "%20")) {
                             try? await BackendAPIService.shared.downloadStem(from: remoteURL, to: localURL)
                         }
                     }

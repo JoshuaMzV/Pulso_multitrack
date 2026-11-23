@@ -184,8 +184,7 @@ struct ModernShowView: View {
 
                     // Bottom Right (.mo-hc-bottom-right)
                     VStack(alignment: .trailing, spacing: 10) {
-                        let remaining = max(0, vm.currentSong.durationSeconds - vm.currentSeconds)
-                        Text(formatCountdown(remaining))
+                        Text(vm.formattedRemainingTime)
                             .font(.system(size: 48, weight: .black, design: .monospaced))
                             .foregroundColor(PulsoTheme.amber)
                             .lineLimit(1)
