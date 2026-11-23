@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Root View combining Header and Modern Show or Mixer mode
 struct PulsoRootView: View {
@@ -31,15 +32,36 @@ struct PulsoRootView: View {
                     .transition(.opacity)
             }
 
+            // Setlist Selector Modal ("SETLISTS EN SERVIDOR")
+            if vm.showingSetlistSelectorModal {
+                SetlistSelectorModalView(vm: vm)
+                    .transition(.opacity)
+            }
+
+            // Upload Song Wizard Modal ("SUBIR NUEVA CANCIÓN AL SERVIDOR")
+            if vm.showingUploadSongWizard {
+                UploadSongModalView(vm: vm)
+                    .transition(.opacity)
+            }
+
             // Auth Modal ("ACCESO PULSO")
             if vm.showingAuthModal {
                 AuthModalView(vm: vm)
                     .transition(.opacity)
             }
         }
+        .fileImporter(
+            isPresented: $vm.showingLocalFilePicker,
+            allowedContentTypes: [.zip, .audio],
+            allowsMultipleSelection: true
+        ) { result in
+            vm.handleLocalFilesImported(result)
+        }
         .animation(.easeInOut(duration: 0.2), value: vm.showingAuthModal)
         .animation(.easeInOut(duration: 0.2), value: vm.showingCloudCatalogModal)
         .animation(.easeInOut(duration: 0.2), value: vm.showingAddSongModal)
+        .animation(.easeInOut(duration: 0.2), value: vm.showingSetlistSelectorModal)
+        .animation(.easeInOut(duration: 0.2), value: vm.showingUploadSongWizard)
         .background(PulsoTheme.bg.ignoresSafeArea())
     }
 }

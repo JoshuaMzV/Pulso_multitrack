@@ -55,18 +55,23 @@ struct ModernShowView: View {
             }
 
             // Center Pill (.mo-nav-center)
-            HStack(spacing: 8) {
-                Text(vm.setlist.name)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(PulsoTheme.textLight)
-                Text("\(vm.setlist.currentIndex + 1)/\(vm.setlist.songs.count)")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(PulsoTheme.amber)
+            Button(action: { vm.showingSetlistSelectorModal = true }) {
+                HStack(spacing: 8) {
+                    Text(vm.setlist.name)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(PulsoTheme.textLight)
+                    Text("\(vm.setlist.currentIndex + 1)/\(vm.setlist.songs.count)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(PulsoTheme.amber)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(PulsoTheme.mut)
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 36)
+                .background(PulsoTheme.navBtnBg)
+                .cornerRadius(18)
             }
-            .padding(.horizontal, 16)
-            .frame(height: 36)
-            .background(PulsoTheme.navBtnBg)
-            .cornerRadius(18)
 
             // Next Button (.mo-nav-btn)
             Button(action: { vm.nextSongAction() }) {
@@ -101,6 +106,30 @@ struct ModernShowView: View {
                             .tracking(1.0)
                             .foregroundColor(PulsoTheme.textDim)
                             .lineLimit(1)
+
+                        if !vm.currentSong.isDownloadedLocally {
+                            Button(action: {
+                                vm.verifyAndDownloadStemsIfNeeded(for: vm.currentSong)
+                            }) {
+                                HStack(spacing: 5) {
+                                    if let prog = vm.downloadProgress[vm.currentSong.id] {
+                                        ProgressView().tint(PulsoTheme.amber).scaleEffect(0.6)
+                                        Text("DESCARGANDO STEMS: \(Int(prog * 100))%")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    } else {
+                                        Image(systemName: "arrow.down.circle.fill")
+                                            .font(.system(size: 10))
+                                        Text("STEMS EN SERVIDOR (DESCARGAR)")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    }
+                                }
+                                .foregroundColor(PulsoTheme.amber)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(PulsoTheme.amber.opacity(0.15))
+                                .cornerRadius(4)
+                            }
+                        }
                     }
 
                     Spacer()

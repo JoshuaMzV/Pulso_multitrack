@@ -94,6 +94,7 @@ struct AddSongChoiceModalView: View {
                     // Option 2: LOCAL
                     Button(action: {
                         vm.showingAddSongModal = false
+                        vm.showingLocalFilePicker = true
                     }) {
                         VStack(spacing: 12) {
                             ZStack {

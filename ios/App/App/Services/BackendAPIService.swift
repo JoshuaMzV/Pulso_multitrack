@@ -300,6 +300,113 @@ final class BackendAPIService {
         try FileManager.default.moveItem(at: tempURL, to: destinationURL)
     }
 
+    // MARK: - Setlists API
+
+    /// Obtiene las setlists disponibles para la cuenta activa en el servidor
+    func fetchSetlists() async throws -> [SetlistItem] {
+        guard let url = URL(string: "\(baseURL)/api/setlists") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = parseErrorMessage(from: data) ?? "Error al cargar setlists del servidor"
+            throw APIError.serverError(msg)
+        }
+        return try JSONDecoder().decode([SetlistItem].self, from: data)
+    }
+
+    /// Guarda las setlists en el servidor
+    func saveSetlists(_ setlists: [SetlistItem]) async throws {
+        guard let url = URL(string: "\(baseURL)/api/setlists") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(setlists)
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = parseErrorMessage(from: data) ?? "Error al guardar setlists en el servidor"
+            throw APIError.serverError(msg)
+        }
+    }
+
+    // MARK: - Multitrack Upload API
+
+    /// Sube un archivo .zip de multitrack con sus metadatos y mapeo de stems al servidor
+    func uploadSong(
+        title: String,
+        artist: String,
+        bpm: Double,
+        key: String,
+        zipData: Data,
+        zipFilename: String,
+        coverData: Data? = nil,
+        stemsMappingJson: String? = nil
+    ) async throws -> CloudSong {
+        guard let url = URL(string: "\(baseURL)/api/upload") else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300.0 // 5 minutos para subidas grandes
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+
+        func addFormField(name: String, value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+
+        addFormField(name: "title", value: title)
+        addFormField(name: "artist", value: artist)
+        addFormField(name: "bpm", value: String(bpm))
+        addFormField(name: "key", value: key)
+        if let mapping = stemsMappingJson {
+            addFormField(name: "stems", value: mapping)
+        }
+
+        if let cover = coverData {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"cover\"; filename=\"cover.jpg\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+            body.append(cover)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(zipFilename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/zip\r\n\r\n".data(using: .utf8)!)
+        body.append(zipData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await performRequest(request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = parseErrorMessage(from: data) ?? "Error al subir multitrack al servidor"
+            throw APIError.serverError(msg)
+        }
+
+        struct UploadResponse: Codable {
+            let status: String?
+            let message: String?
+            let song: CloudSong?
+        }
+
+        if let upRes = try? JSONDecoder().decode(UploadResponse.self, from: data), let song = upRes.song {
+            return song
+        }
+        return try JSONDecoder().decode(CloudSong.self, from: data)
+    }
+
     // MARK: - Internal HTTP Helper
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {

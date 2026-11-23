@@ -111,7 +111,7 @@ struct AppHeaderView: View {
 
                     // In Edition Mode: + SUBIR CANCIÓN
                     if vm.mode == .edition {
-                        Button(action: { vm.showingAddSongModal = true }) {
+                        Button(action: { vm.showingUploadSongWizard = true }) {
                             HStack(spacing: 5) {
                                 Image(systemName: "icloud.and.arrow.up.fill")
                                     .font(.system(size: 11, weight: .bold))

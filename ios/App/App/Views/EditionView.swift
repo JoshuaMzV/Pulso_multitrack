@@ -58,7 +58,7 @@ struct EditionView: View {
         VStack(spacing: 0) {
             // Sidebar Header (.sidebar-header)
             HStack {
-                Button(action: {}) {
+                Button(action: { vm.showingSetlistSelectorModal = true }) {
                     HStack(spacing: 6) {
                         Image(systemName: "square.stack.3d.up")
                             .font(.system(size: 13, weight: .bold))
@@ -258,6 +258,31 @@ struct EditionView: View {
                             )
                             .cornerRadius(4)
                     }
+
+                    // Estado de descarga de stems
+                    if !vm.currentSong.isDownloadedLocally {
+                        Button(action: {
+                            vm.verifyAndDownloadStemsIfNeeded(for: vm.currentSong)
+                        }) {
+                            HStack(spacing: 5) {
+                                if let prog = vm.downloadProgress[vm.currentSong.id] {
+                                    ProgressView().tint(PulsoTheme.amber).scaleEffect(0.6)
+                                    Text("\(Int(prog * 100))%")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                } else {
+                                    Image(systemName: "icloud.and.arrow.down.fill")
+                                        .font(.system(size: 10))
+                                    Text("DESCARGAR STEMS")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                }
+                            }
+                            .foregroundColor(PulsoTheme.amber)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(PulsoTheme.amber.opacity(0.15))
+                            .cornerRadius(4)
+                        }
+                    }
                 }
 
                 Spacer()
@@ -282,15 +307,26 @@ struct EditionView: View {
                         .cornerRadius(5)
                     }
 
-                    Button(action: {}) {
-                        Text("Guardar")
-                            .font(.system(size: 11, weight: .heavy))
-                            .foregroundColor(Color(hex: 0x060709))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(PulsoTheme.amber)
-                            .cornerRadius(5)
+                    Button(action: {
+                        Task { await vm.saveSetlistsToBackend() }
+                    }) {
+                        HStack(spacing: 5) {
+                            if vm.isSavingSetlist {
+                                ProgressView().tint(.black).scaleEffect(0.7)
+                            } else if vm.setlistSavedSuccess {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            Text(vm.setlistSavedSuccess ? "¡Guardado!" : (vm.isSavingSetlist ? "Guardando..." : "Guardar"))
+                                .font(.system(size: 11, weight: .heavy))
+                        }
+                        .foregroundColor(Color(hex: 0x060709))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(vm.setlistSavedSuccess ? PulsoTheme.green : PulsoTheme.amber)
+                        .cornerRadius(5)
                     }
+                    .disabled(vm.isSavingSetlist)
                 }
             }
             .padding(.horizontal, 14)

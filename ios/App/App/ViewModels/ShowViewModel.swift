@@ -53,6 +53,15 @@ final class ShowViewModel: ObservableObject {
     @Published var showingCloudCatalogModal: Bool = false
     @Published var showingArrangerPanel: Bool = false
     @Published var showingTransposeDialog: Bool = false
+    @Published var showingSetlistSelectorModal: Bool = false
+    @Published var showingLocalFilePicker: Bool = false
+    @Published var showingUploadSongWizard: Bool = false
+
+    // Setlists del Servidor
+    @Published var availableSetlists: [SetlistItem] = []
+    @Published var isLoadingSetlists: Bool = false
+    @Published var isSavingSetlist: Bool = false
+    @Published var setlistSavedSuccess: Bool = false
 
     // Cloud Catalog & Downloads
     @Published var cloudCatalog: [CloudSong] = []
@@ -97,6 +106,7 @@ final class ShowViewModel: ObservableObject {
     init() {
         self.loadSong(MockSongData.song1)
         self.checkSessionWithBackend()
+        self.loadSetlistsFromBackend()
     }
 
     func selectTrack(id: String) {
@@ -119,6 +129,91 @@ final class ShowViewModel: ObservableObject {
             nextSong = setlist.songs[idx + 1]
         } else {
             nextSong = nil
+        }
+
+        // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
+        if !song.isDownloadedLocally {
+            verifyAndDownloadStemsIfNeeded(for: song)
+        }
+    }
+
+    // MARK: - Setlists del Servidor
+
+    func loadSetlistsFromBackend() {
+        isLoadingSetlists = true
+        Task {
+            do {
+                let fetched = try await BackendAPIService.shared.fetchSetlists()
+                self.availableSetlists = fetched
+                self.isLoadingSetlists = false
+
+                // Si hay un setlist guardado en el servidor que coincide con el actual o el primero
+                if let match = fetched.first(where: { $0.id == self.setlist.id }) {
+                    self.setlist = match
+                    if let first = match.songs.first {
+                        self.loadSong(first)
+                    }
+                } else if let firstSetlist = fetched.first, self.setlist.songs.isEmpty || self.setlist.id == "mock-setlist" {
+                    self.setlist = firstSetlist
+                    if let first = firstSetlist.songs.first {
+                        self.loadSong(first)
+                    }
+                }
+            } catch {
+                print("[PULSO SETLISTS] Error cargando setlists: \(error)")
+                self.isLoadingSetlists = false
+            }
+        }
+    }
+
+    func switchSetlist(to newSetlist: SetlistItem) {
+        self.setlist = newSetlist
+        if let first = newSetlist.songs.first {
+            self.loadSong(first)
+        }
+        self.showingSetlistSelectorModal = false
+    }
+
+    func createNewSetlist(name: String, description: String = "") {
+        let newId = "setlist-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let newSetlist = SetlistItem(
+            id: newId,
+            name: name,
+            description: description,
+            songs: [],
+            groupId: nil
+        )
+        self.availableSetlists.append(newSetlist)
+        self.setlist = newSetlist
+        self.showingSetlistSelectorModal = false
+        Task {
+            await self.saveSetlistsToBackend()
+        }
+    }
+
+    func saveSetlistsToBackend() async {
+        isSavingSetlist = true
+        setlistSavedSuccess = false
+
+        // Actualizar el setlist actual dentro de availableSetlists
+        if let idx = availableSetlists.firstIndex(where: { $0.id == setlist.id }) {
+            availableSetlists[idx] = setlist
+        } else {
+            availableSetlists.append(setlist)
+        }
+
+        do {
+            try await BackendAPIService.shared.saveSetlists(availableSetlists)
+            isSavingSetlist = false
+            setlistSavedSuccess = true
+
+            // Ocultar mensaje de guardado tras 2.5s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                self.setlistSavedSuccess = false
+            }
+        } catch {
+            print("[PULSO SETLISTS] Error guardando setlists en servidor: \(error)")
+            isSavingSetlist = false
         }
     }
 
@@ -410,6 +505,160 @@ final class ShowViewModel: ObservableObject {
         }
     }
 
+    /// Verifica si los stems de la canción están en el almacenamiento local; si no, los descarga automáticamente del servidor
+    func verifyAndDownloadStemsIfNeeded(for song: SongItem) {
+        if song.isDownloadedLocally { return }
+
+        Task {
+            if self.cloudCatalog.isEmpty {
+                await self.loadCloudCatalog()
+            }
+
+            // Buscar la canción en el catálogo del servidor
+            if let cloudSong = self.cloudCatalog.first(where: {
+                $0.id == song.id || $0.title.lowercased() == song.title.lowercased()
+            }) {
+                self.downloadAndAddSong(cloudSong)
+            } else {
+                // Descargar stems según la estructura de la canción
+                let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let folderName = song.folderName
+                let songDir = docDir.appendingPathComponent("Songs").appendingPathComponent(folderName)
+                try? FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
+
+                let total = Double(max(song.stems.count, 1))
+                for (idx, stem) in song.stems.enumerated() {
+                    let stemFilename = "\(stem.id).mp3"
+                    let localURL = songDir.appendingPathComponent(stemFilename)
+                    if !FileManager.default.fileExists(atPath: localURL.path) {
+                        let remoteURLStr = "\(BackendAPIService.shared.baseURL)/songs/extracted/\(folderName)/\(stemFilename)"
+                        if let remoteURL = URL(string: remoteURLStr) {
+                            try? await BackendAPIService.shared.downloadStem(from: remoteURL, to: localURL)
+                        }
+                    }
+                    self.downloadProgress[song.id] = Double(idx + 1) / total
+                }
+                self.downloadProgress[song.id] = nil
+            }
+        }
+    }
+
+    // MARK: - Importador Local de Archivos (ZIP / Audio)
+
+    func handleLocalFilesImported(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            guard !urls.isEmpty else { return }
+
+            for url in urls {
+                guard url.startAccessingSecurityScopedResource() else { continue }
+                defer { url.stopAccessingSecurityScopedResource() }
+
+                let ext = url.pathExtension.lowercased()
+                let fileName = url.deletingPathExtension().lastPathComponent
+                let cleanTitle = fileName.replacingOccurrences(of: "_", with: " ").capitalized
+
+                let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let folderName = fileName.replacingOccurrences(of: " ", with: "_")
+                let songDir = docDir.appendingPathComponent("Songs").appendingPathComponent(folderName)
+                try FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
+
+                if ext == "zip" {
+                    let zipData = try Data(contentsOf: url)
+                    let audioNames = NativeZipInspector.extractAudioFilenames(from: zipData)
+                    var importedStems: [StemItem] = []
+
+                    if !audioNames.isEmpty {
+                        for (idx, name) in audioNames.enumerated() {
+                            let classification = NativeZipInspector.autoClassify(filename: name)
+                            let colorHex: String
+                            switch classification.category {
+                            case "click": colorHex = "#9297A0"
+                            case "guide": colorHex = "#F0A028"
+                            case "drums": colorHex = "#FF4B33"
+                            case "bass": colorHex = "#3DDC84"
+                            case "keys": colorHex = "#4DA6FF"
+                            case "pad": colorHex = "#B388FF"
+                            case "guitars": colorHex = "#FFBE55"
+                            case "vocals": colorHex = "#EC4899"
+                            default: colorHex = "#C3C7CC"
+                            }
+
+                            let destAudioURL = songDir.appendingPathComponent(name)
+                            if !FileManager.default.fileExists(atPath: destAudioURL.path) {
+                                FileManager.default.createFile(atPath: destAudioURL.path, contents: Data(), attributes: nil)
+                            }
+
+                            importedStems.append(StemItem(
+                                id: "local_\(idx)_\(classification.label.lowercased())",
+                                label: classification.label,
+                                category: classification.category,
+                                colorHex: colorHex,
+                                bus: classification.bus,
+                                gainDb: 0.0
+                            ))
+                        }
+                    }
+
+                    let newLocalSong = SongItem(
+                        id: "local_\(Int(Date().timeIntervalSince1970))",
+                        title: cleanTitle,
+                        artist: "Local (iPad)",
+                        bpm: 120.0,
+                        key: "C",
+                        timeSignature: "4/4",
+                        durationSeconds: 240.0,
+                        stems: importedStems.isEmpty ? MockSongData.song1.stems : importedStems,
+                        sections: [
+                            SectionItem(id: 1, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.amber),
+                            SectionItem(id: 2, name: "VERSO", startBar: 9, lengthBars: 8, color: Color(hexString: "#26a69a")),
+                            SectionItem(id: 3, name: "CORO", startBar: 17, lengthBars: 8, color: Color(hexString: "#ef5350"))
+                        ]
+                    )
+
+                    self.setlist.songs.append(newLocalSong)
+                    self.loadSong(newLocalSong)
+                } else if ["mp3", "wav", "flac", "m4a", "aac"].contains(ext) {
+                    let destURL = songDir.appendingPathComponent(url.lastPathComponent)
+                    if FileManager.default.fileExists(atPath: destURL.path) {
+                        try? FileManager.default.removeItem(at: destURL)
+                    }
+                    try FileManager.default.copyItem(at: url, to: destURL)
+
+                    let classification = NativeZipInspector.autoClassify(filename: url.lastPathComponent)
+                    let newStem = StemItem(
+                        id: classification.label.lowercased(),
+                        label: classification.label,
+                        category: classification.category,
+                        colorHex: "#F0A028",
+                        bus: classification.bus,
+                        gainDb: 0.0
+                    )
+
+                    let newLocalSong = SongItem(
+                        id: "local_\(Int(Date().timeIntervalSince1970))",
+                        title: cleanTitle,
+                        artist: "Local (iPad)",
+                        bpm: 120.0,
+                        key: "C",
+                        timeSignature: "4/4",
+                        durationSeconds: 200.0,
+                        stems: [newStem],
+                        sections: [
+                            SectionItem(id: 1, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.amber),
+                            SectionItem(id: 2, name: "VERSO", startBar: 9, lengthBars: 8, color: Color(hexString: "#26a69a"))
+                        ]
+                    )
+
+                    self.setlist.songs.append(newLocalSong)
+                    self.loadSong(newLocalSong)
+                }
+            }
+        } catch {
+            print("[PULSO LOCAL] Error importando archivos: \(error)")
+        }
+    }
+
     // MARK: - Internal Simulation Clock (Active until Phase 2 AudioEngine attaches)
 
     private func startSimulationTimer() {
@@ -440,18 +689,27 @@ final class ShowViewModel: ObservableObject {
                     }
                 }
 
-                // Animate meters slightly for visual feedback
-                for i in self.stems.indices {
-                    if !self.stems[i].muted {
-                        let gainLinear = pow(10.0, self.stems[i].gainDb / 20.0)
-                        self.stems[i].rms = Float.random(in: 0.3...0.85) * min(1.2, gainLinear)
-                    } else {
+                // Si los stems no están descargados localmente, no mostrar movimiento de audio / medidores
+                if !self.currentSong.isDownloadedLocally {
+                    for i in self.stems.indices {
                         self.stems[i].rms = 0.0
                     }
+                    self.masterRmsL = 0.0
+                    self.masterRmsR = 0.0
+                } else {
+                    // Animate meters slightly for visual feedback
+                    for i in self.stems.indices {
+                        if !self.stems[i].muted {
+                            let gainLinear = pow(10.0, self.stems[i].gainDb / 20.0)
+                            self.stems[i].rms = Float.random(in: 0.3...0.85) * min(1.2, gainLinear)
+                        } else {
+                            self.stems[i].rms = 0.0
+                        }
+                    }
+                    let masterLinear = pow(10.0, self.masterDb / 20.0)
+                    self.masterRmsL = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
+                    self.masterRmsR = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
                 }
-                let masterLinear = pow(10.0, self.masterDb / 20.0)
-                self.masterRmsL = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
-                self.masterRmsR = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
             }
         }
     }
