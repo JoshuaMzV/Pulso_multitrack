@@ -3,7 +3,6 @@ import SwiftUI
 /// Exact replica of `.show-layout-modern` from PULSO Web
 struct ModernShowView: View {
     @ObservedObject var vm: ShowViewModel
-    @State private var showingTransposeDialog = false
     @State private var showingPadDialog = false
 
     var body: some View {
@@ -32,9 +31,6 @@ struct ModernShowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PulsoTheme.bg.ignoresSafeArea())
-        .sheet(isPresented: $showingTransposeDialog) {
-            transposeDialog
-        }
         .sheet(isPresented: $showingPadDialog) {
             padDialog
         }
@@ -137,7 +133,7 @@ struct ModernShowView: View {
                     // Top Right (.mo-hc-top-right)
                     VStack(alignment: .trailing, spacing: 8) {
                         // Key Button (.mo-hc-key)
-                        Button(action: { showingTransposeDialog = true }) {
+                        Button(action: { vm.showingTransposeDialog = true }) {
                             Text(vm.currentSong.key)
                                 .font(.system(size: 16, weight: .bold, design: .monospaced))
                                 .foregroundColor(PulsoTheme.amber)
@@ -421,41 +417,7 @@ struct ModernShowView: View {
         .cornerRadius(PulsoTheme.radMd)
     }
 
-    // MARK: - Modals (Transpose & Pad)
-
-    private var transposeDialog: some View {
-        VStack(spacing: 16) {
-            Text("TRANSPONER CANCIÓN")
-                .font(.system(size: 16, weight: .black))
-                .foregroundColor(PulsoTheme.textLight)
-
-            let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "Bb", "B"]
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
-                ForEach(notes, id: \.self) { note in
-                    let isSel = vm.currentSong.key == note
-                    Button(action: {
-                        vm.setSongKey(note)
-                        showingTransposeDialog = false
-                    }) {
-                        Text(note)
-                            .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(isSel ? Color(hex: 0x111111) : PulsoTheme.textLight)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(isSel ? PulsoTheme.amber : PulsoTheme.panel)
-                            .cornerRadius(PulsoTheme.radSm)
-                    }
-                }
-            }
-
-            Text("El tempo se conserva. Click, guía y batería quedan sin transponer.")
-                .font(.system(size: 11))
-                .foregroundColor(PulsoTheme.textDim)
-                .multilineTextAlignment(.center)
-        }
-        .padding(24)
-        .background(PulsoTheme.cardBg.ignoresSafeArea())
-    }
+    // MARK: - Modals (Pad)
 
     private var padDialog: some View {
         VStack(spacing: 16) {

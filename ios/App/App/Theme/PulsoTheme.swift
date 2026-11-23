@@ -1,49 +1,75 @@
 import SwiftUI
+import UIKit
 
 /// Exact design tokens and color palette matching PULSO Web (`tokens.css` and `show.css`)
+/// Supports automatic dark and light theme switching via dynamic UIColors.
 enum PulsoTheme {
     // Stage and Base Surfaces
-    static let bg = Color(hex: 0x111111)
-    static let panel = Color(hex: 0x1C1916)
-    static let panel2 = Color(hex: 0x171412)
-    static let cardBg = Color(hex: 0x1A1A1A)
-    static let card = Color(hex: 0x1A1A1A)
-    static let surface = Color(hex: 0x1C1916)
-    static let raise = Color(hex: 0x272219)
-    static let raiseHover = Color(hex: 0x332C23)
-    static let navBtnBg = Color(hex: 0x1F1F1F)
-    static let blackBox = Color(hex: 0x08090C)
+    static let bg = Color(UIColor.dynamic(dark: 0x111111, light: 0xF3F4F6))
+    static let panel = Color(UIColor.dynamic(dark: 0x1C1916, light: 0xFFFFFF))
+    static let panel2 = Color(UIColor.dynamic(dark: 0x171412, light: 0xF9FAFB))
+    static let cardBg = Color(UIColor.dynamic(dark: 0x1A1A1A, light: 0xFFFFFF))
+    static let card = Color(UIColor.dynamic(dark: 0x1A1A1A, light: 0xFFFFFF))
+    static let surface = Color(UIColor.dynamic(dark: 0x1C1916, light: 0xF8F9FA))
+    static let raise = Color(UIColor.dynamic(dark: 0x272219, light: 0xEEEEF0))
+    static let raiseHover = Color(UIColor.dynamic(dark: 0x332C23, light: 0xE2E4E8))
+    static let navBtnBg = Color(UIColor.dynamic(dark: 0x1F1F1F, light: 0xE5E7EB))
+    static let blackBox = Color(UIColor.dynamic(dark: 0x08090C, light: 0xE5E7EB))
 
     // Lines & Borders
-    static let border = Color(hex: 0x2A2A2A)
-    static let line = Color(hex: 0x2A241E)
-    static let line2 = Color(hex: 0x38312A)
+    static let border = Color(UIColor.dynamic(dark: 0x2A2A2A, light: 0xE2E5E9))
+    static let line = Color(UIColor.dynamic(dark: 0x2A241E, light: 0xE5E7EB))
+    static let line2 = Color(UIColor.dynamic(dark: 0x38312A, light: 0xD1D5DB))
 
     // Typography Colors
-    static let textLight = Color(hex: 0xF4F4F4)
-    static let ink = Color(hex: 0xEDE7DD)
-    static let ink2 = Color(hex: 0xC4BDB3)
-    static let textDim = Color(hex: 0x888888)
-    static let mut = Color(hex: 0x9C948A)
-    static let dim = Color(hex: 0x5C554B)
+    static let textLight = Color(UIColor.dynamic(dark: 0xF4F4F4, light: 0x111827))
+    static let ink = Color(UIColor.dynamic(dark: 0xEDE7DD, light: 0x1F2937))
+    static let ink2 = Color(UIColor.dynamic(dark: 0xC4BDB3, light: 0x4B5563))
+    static let textDim = Color(UIColor.dynamic(dark: 0x888888, light: 0x6B7280))
+    static let mut = Color(UIColor.dynamic(dark: 0x9C948A, light: 0x6B7280))
+    static let dim = Color(UIColor.dynamic(dark: 0x5C554B, light: 0x9CA3AF))
 
     // Stage Accents
-    static let amber = Color(hex: 0xF0A542)
-    static let amberDark = Color(hex: 0xE9A23B)
-    static let amberDim = Color(red: 240/255, green: 165/255, blue: 66/255, opacity: 0.15)
-    static let amberGlow = Color(red: 240/255, green: 165/255, blue: 66/255, opacity: 0.40)
+    static let amber = Color(UIColor.dynamic(dark: 0xF0A542, light: 0xD97706))
+    static let amberDark = Color(UIColor.dynamic(dark: 0xE9A23B, light: 0xB45309))
+    static let amberDim = Color(UIColor { trait in
+        trait.userInterfaceStyle == .light ?
+            UIColor(red: 217/255, green: 119/255, blue: 6/255, alpha: 0.15) :
+            UIColor(red: 240/255, green: 165/255, blue: 66/255, alpha: 0.15)
+    })
+    static let amberGlow = Color(UIColor { trait in
+        trait.userInterfaceStyle == .light ?
+            UIColor(red: 217/255, green: 119/255, blue: 6/255, alpha: 0.25) :
+            UIColor(red: 240/255, green: 165/255, blue: 66/255, alpha: 0.40)
+    })
 
-    static let teal = Color(hex: 0x42CBAA)
-    static let tealDim = Color(red: 66/255, green: 203/255, blue: 170/255, opacity: 0.15)
-    static let red = Color(hex: 0xE4604E)
-    static let green = Color(hex: 0x43B97C)
-    static let blue = Color(hex: 0x3B82F6)
-    static let purple = Color(hex: 0xA855F7)
+    static let teal = Color(UIColor.dynamic(dark: 0x42CBAA, light: 0x0D9488))
+    static let tealDim = Color(UIColor { trait in
+        trait.userInterfaceStyle == .light ?
+            UIColor(red: 13/255, green: 148/255, blue: 136/255, alpha: 0.15) :
+            UIColor(red: 66/255, green: 203/255, blue: 170/255, alpha: 0.15)
+    })
+    static let red = Color(UIColor.dynamic(dark: 0xE4604E, light: 0xDC2626))
+    static let green = Color(UIColor.dynamic(dark: 0x43B97C, light: 0x16A34A))
+    static let blue = Color(UIColor.dynamic(dark: 0x3B82F6, light: 0x2563EB))
+    static let purple = Color(UIColor.dynamic(dark: 0xA855F7, light: 0x9333EA))
 
     // Corner Radii
     static let radLg: CGFloat = 16
     static let radMd: CGFloat = 10
     static let radSm: CGFloat = 6
+}
+
+extension UIColor {
+    static func dynamic(dark: UInt, light: UInt, alpha: CGFloat = 1.0) -> UIColor {
+        return UIColor { traitCollection in
+            let hex = traitCollection.userInterfaceStyle == .light ? light : dark
+            let r = CGFloat((hex >> 16) & 0xFF) / 255.0
+            let g = CGFloat((hex >> 8) & 0xFF) / 255.0
+            let b = CGFloat(hex & 0xFF) / 255.0
+            return UIColor(red: r, green: g, blue: b, alpha: alpha)
+        }
+    }
 }
 
 extension Color {

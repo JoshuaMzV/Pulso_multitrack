@@ -32,6 +32,7 @@
 		F42000000000000000000025 /* CloudCatalogModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000025; };
 		F42000000000000000000026 /* SetlistSelectorModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000026; };
 		F42000000000000000000027 /* UploadSongModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000027; };
+		F42000000000000000000028 /* MultitrackAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41000000000000000000028; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 		F41000000000000000000025 /* CloudCatalogModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/CloudCatalogModalView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000026 /* SetlistSelectorModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/SetlistSelectorModalView.swift"; sourceTree = "<group>"; };
 		F41000000000000000000027 /* UploadSongModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/UploadSongModalView.swift"; sourceTree = "<group>"; };
+		F41000000000000000000028 /* MultitrackAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/MultitrackAudioEngine.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +116,7 @@
 				F41000000000000000000025 /* CloudCatalogModalView.swift */,
 				F41000000000000000000026 /* SetlistSelectorModalView.swift */,
 				F41000000000000000000027 /* UploadSongModalView.swift */,
+				F41000000000000000000028 /* MultitrackAudioEngine.swift */,
 				F41000000000000000000004 /* FullPulsoView.swift */,
 				F41000000000000000000002 /* pulso_engine.cpp */,
 				F41000000000000000000003 /* pulso_mixer_simd.cpp */,
@@ -220,6 +223,7 @@
 				F42000000000000000000025 /* CloudCatalogModalView.swift in Sources */,
 				F42000000000000000000026 /* SetlistSelectorModalView.swift in Sources */,
 				F42000000000000000000027 /* UploadSongModalView.swift in Sources */,
+				F42000000000000000000028 /* MultitrackAudioEngine.swift in Sources */,
 				F42000000000000000000002 /* pulso_engine.cpp in Sources */,
 				F42000000000000000000003 /* pulso_mixer_simd.cpp in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,

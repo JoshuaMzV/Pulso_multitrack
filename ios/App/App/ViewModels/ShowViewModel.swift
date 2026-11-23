@@ -83,7 +83,11 @@ final class ShowViewModel: ObservableObject {
     @Published var loopSection: Bool = false
 
     // Master & Pad
-    @Published var masterDb: Float = 0.0
+    @Published var masterDb: Float = 0.0 {
+        didSet {
+            MultitrackAudioEngine.shared.setMasterDb(masterDb)
+        }
+    }
     @Published var masterRmsL: Float = 0.0
     @Published var masterRmsR: Float = 0.0
     @Published var padActive: Bool = false
@@ -130,6 +134,13 @@ final class ShowViewModel: ObservableObject {
         } else {
             nextSong = nil
         }
+
+        // Cargar pistas en el motor nativo multitrack
+        MultitrackAudioEngine.shared.loadSongTracks(
+            folderName: song.folderName,
+            stems: song.stems,
+            duration: song.durationSeconds
+        )
 
         // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
         if !song.isDownloadedLocally {
@@ -256,11 +267,23 @@ final class ShowViewModel: ObservableObject {
     // MARK: - Transport
 
     func togglePlayPause() {
-        isPlaying.toggle()
-        if isPlaying {
-            startSimulationTimer()
+        if MultitrackAudioEngine.shared.hasLoadedTracks {
+            if isPlaying {
+                MultitrackAudioEngine.shared.pause()
+                isPlaying = false
+                stopSimulationTimer()
+            } else {
+                MultitrackAudioEngine.shared.play()
+                isPlaying = true
+                startSimulationTimer()
+            }
         } else {
-            stopSimulationTimer()
+            isPlaying.toggle()
+            if isPlaying {
+                startSimulationTimer()
+            } else {
+                stopSimulationTimer()
+            }
         }
     }
 
@@ -270,6 +293,7 @@ final class ShowViewModel: ObservableObject {
         currentBar = 1
         currentBeat = 1
         activeSectionIndex = 0
+        MultitrackAudioEngine.shared.stop()
         stopSimulationTimer()
         for i in stems.indices {
             stems[i].rms = 0.0
@@ -284,7 +308,7 @@ final class ShowViewModel: ObservableObject {
         let sec = currentSong.sections[index]
         currentBar = sec.startBar
         let secondsPerBar = (60.0 / currentSong.bpm) * 4.0
-        currentSeconds = Double(sec.startBar - 1) * secondsPerBar
+        seek(to: Double(sec.startBar - 1) * secondsPerBar)
     }
 
     func seek(to seconds: Double) {
@@ -300,6 +324,10 @@ final class ShowViewModel: ObservableObject {
                 activeSectionIndex = idx
                 break
             }
+        }
+
+        if MultitrackAudioEngine.shared.hasLoadedTracks {
+            MultitrackAudioEngine.shared.seek(to: clamped)
         }
     }
 
@@ -321,16 +349,24 @@ final class ShowViewModel: ObservableObject {
     func setStemDb(id: String, db: Float) {
         guard let idx = stems.firstIndex(where: { $0.id == id }) else { return }
         stems[idx].gainDb = db
+        let soloActive = stems.contains(where: { $0.solo })
+        MultitrackAudioEngine.shared.updateVolume(stem: stems[idx], soloActive: soloActive)
     }
 
     func toggleMute(id: String) {
         guard let idx = stems.firstIndex(where: { $0.id == id }) else { return }
         stems[idx].muted.toggle()
+        let soloActive = stems.contains(where: { $0.solo })
+        MultitrackAudioEngine.shared.updateVolume(stem: stems[idx], soloActive: soloActive)
     }
 
     func toggleSolo(id: String) {
         guard let idx = stems.firstIndex(where: { $0.id == id }) else { return }
         stems[idx].solo.toggle()
+        let soloActive = stems.contains(where: { $0.solo })
+        for stem in stems {
+            MultitrackAudioEngine.shared.updateVolume(stem: stem, soloActive: soloActive)
+        }
     }
 
     func toggleBus(id: String) {
@@ -496,6 +532,13 @@ final class ShowViewModel: ObservableObject {
                 self.currentSong = newSong
                 self.downloadProgress[cloudSong.id] = 1.0
                 self.isDownloadingSong = false
+
+                // Cargar stems en motor nativo multitrack
+                MultitrackAudioEngine.shared.loadSongTracks(
+                    folderName: newSong.folderName,
+                    stems: newSong.stems,
+                    duration: newSong.durationSeconds
+                )
             } catch {
                 print("Error descargando canción: \(error)")
                 self.isDownloadingSong = false
@@ -538,6 +581,13 @@ final class ShowViewModel: ObservableObject {
                     self.downloadProgress[song.id] = Double(idx + 1) / total
                 }
                 self.downloadProgress[song.id] = nil
+
+                // Cargar stems en motor nativo multitrack
+                MultitrackAudioEngine.shared.loadSongTracks(
+                    folderName: song.folderName,
+                    stems: song.stems,
+                    duration: song.durationSeconds
+                )
             }
         }
     }
@@ -666,7 +716,12 @@ final class ShowViewModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isPlaying else { return }
-                self.currentSeconds += interval
+                if MultitrackAudioEngine.shared.hasLoadedTracks {
+                    self.currentSeconds = MultitrackAudioEngine.shared.currentSeconds
+                } else {
+                    self.currentSeconds += interval
+                }
+
                 if self.currentSeconds >= self.currentSong.durationSeconds {
                     self.stop()
                     return
@@ -688,15 +743,23 @@ final class ShowViewModel: ObservableObject {
                     }
                 }
 
-                // Si los stems no están descargados localmente, no mostrar movimiento de audio / medidores
-                if !self.currentSong.isDownloadedLocally {
+                if MultitrackAudioEngine.shared.hasLoadedTracks {
+                    // Sincronizar medidores de nivel RMS medidos directamente desde AVAudioEngine
+                    for i in self.stems.indices {
+                        let id = self.stems[i].id
+                        self.stems[i].rms = MultitrackAudioEngine.shared.rmsLevels[id] ?? 0.0
+                    }
+                    self.masterRmsL = MultitrackAudioEngine.shared.masterRmsL
+                    self.masterRmsR = MultitrackAudioEngine.shared.masterRmsR
+                } else if !self.currentSong.isDownloadedLocally {
+                    // Si los stems no están descargados localmente, no mostrar movimiento de audio / medidores
                     for i in self.stems.indices {
                         self.stems[i].rms = 0.0
                     }
                     self.masterRmsL = 0.0
                     self.masterRmsR = 0.0
                 } else {
-                    // Animate meters slightly for visual feedback
+                    // Simulación ligera cuando no hay audio cargado
                     for i in self.stems.indices {
                         if !self.stems[i].muted {
                             let gainLinear = pow(10.0, self.stems[i].gainDb / 20.0)

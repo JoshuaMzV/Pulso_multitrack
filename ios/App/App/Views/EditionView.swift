@@ -100,6 +100,28 @@ struct EditionView: View {
                             VStack(spacing: 6) {
                                 // Top row: Title & Key badge (No arrows)
                                 HStack(spacing: 6) {
+                                    // Indicador circular de estado de descarga (check verde cuando está lista)
+                                    if song.isDownloadedLocally {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(PulsoTheme.green)
+                                    } else if let prog = vm.downloadProgress[song.id] {
+                                        ZStack {
+                                            Circle()
+                                                .stroke(PulsoTheme.border, lineWidth: 1.5)
+                                                .frame(width: 11, height: 11)
+                                            Circle()
+                                                .trim(from: 0, to: CGFloat(prog))
+                                                .stroke(PulsoTheme.amber, lineWidth: 1.5)
+                                                .frame(width: 11, height: 11)
+                                                .rotationEffect(.degrees(-90))
+                                        }
+                                    } else {
+                                        Image(systemName: "arrow.down.circle")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(PulsoTheme.dim)
+                                    }
+
                                     Text("\(index + 1). \(song.title)")
                                         .font(.system(size: 12, weight: .bold))
                                         .foregroundColor(isActive ? PulsoTheme.ink : PulsoTheme.textLight)
@@ -231,11 +253,6 @@ struct EditionView: View {
             // Card Header
             HStack {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(PulsoTheme.green)
-                        .frame(width: 8, height: 8)
-                        .shadow(color: PulsoTheme.green.opacity(0.6), radius: 3)
-
                     Text(vm.currentSong.title)
                         .font(.system(size: 13, weight: .heavy))
                         .foregroundColor(PulsoTheme.textLight)
@@ -362,11 +379,11 @@ struct EditionView: View {
                                 TimelineTrackRow(
                                     stem: stem,
                                     isSelected: stem.id == vm.selectedTrackId,
-                                    rowHeight: rowHeight
+                                    rowHeight: rowHeight,
+                                    onSelect: {
+                                        vm.selectTrack(id: stem.id)
+                                    }
                                 )
-                                .onTapGesture {
-                                    vm.selectTrack(id: stem.id)
-                                }
                             }
                         }
                         .frame(width: geo.size.width, height: totalHeight)
@@ -384,8 +401,15 @@ struct EditionView: View {
                     }
                     .frame(width: geo.size.width, height: totalHeight)
                     .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        if location.x >= 64.0 {
+                            let trackW = max(1.0, geo.size.width - 64.0)
+                            let ratio = max(0.0, min(1.0, Double((location.x - 64.0) / trackW)))
+                            vm.seek(to: ratio * vm.currentSong.durationSeconds)
+                        }
+                    }
                     .gesture(
-                        DragGesture(minimumDistance: 0)
+                        DragGesture(minimumDistance: 4)
                             .onChanged { value in
                                 let touchX = value.location.x
                                 if touchX >= 64.0 {
@@ -411,41 +435,47 @@ struct EditionView: View {
     }
 
     private var arrangerSectionsBandView: some View {
-        GeometryReader { geo in
-            let totalBars: CGFloat = 96.0
-            let bandWidth = geo.size.width
+        HStack(spacing: 0) {
+            // Placeholder de 64px para alinear exactamente con los nombres de stems y la regla
+            Text("")
+                .frame(width: 64)
 
-            ZStack(alignment: .leading) {
-                ForEach(vm.currentSong.sections) { sec in
-                    let leftPct = CGFloat(sec.startBar - 1) / totalBars
-                    let widthPct = CGFloat(sec.lengthBars) / totalBars
-                    let xPos = leftPct * bandWidth
-                    let secWidth = max(24.0, widthPct * bandWidth)
+            GeometryReader { geo in
+                let totalBars: CGFloat = 96.0
+                let bandWidth = geo.size.width
 
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(sec.color.opacity(0.22))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(sec.color.opacity(0.8), lineWidth: 1)
-                            )
+                ZStack(alignment: .leading) {
+                    ForEach(vm.currentSong.sections) { sec in
+                        let leftPct = CGFloat(max(0, sec.startBar - 1)) / totalBars
+                        let widthPct = CGFloat(sec.lengthBars) / totalBars
+                        let xPos = leftPct * bandWidth
+                        let secWidth = max(24.0, widthPct * bandWidth)
 
-                        Text(sec.name)
-                            .font(.system(size: 8, weight: .black, design: .monospaced))
-                            .foregroundColor(sec.color)
-                            .lineLimit(1)
-                            .padding(.horizontal, 2)
-                    }
-                    .frame(width: secWidth, height: 16)
-                    .offset(x: xPos)
-                    .onTapGesture {
-                        if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
-                            vm.jumpToSection(index: idx)
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(sec.color.opacity(0.22))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .stroke(sec.color.opacity(0.8), lineWidth: 1)
+                                )
+
+                            Text(sec.name)
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
+                                .foregroundColor(sec.color)
+                                .lineLimit(1)
+                                .padding(.horizontal, 2)
+                        }
+                        .frame(width: secWidth, height: 16)
+                        .offset(x: xPos)
+                        .onTapGesture {
+                            if let idx = vm.currentSong.sections.firstIndex(where: { $0.id == sec.id }) {
+                                vm.jumpToSection(index: idx)
+                            }
                         }
                     }
                 }
+                .frame(width: bandWidth, height: geo.size.height)
             }
-            .frame(width: bandWidth, height: geo.size.height)
         }
     }
 
@@ -554,16 +584,21 @@ struct TimelineTrackRow: View {
     let stem: StemItem
     let isSelected: Bool
     var rowHeight: CGFloat = 28
+    var onSelect: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 0) {
-            // Track Name
+            // Track Name (al pulsar selecciona el track para el mezclador)
             Text(stem.label)
                 .font(.system(size: 9, weight: .heavy))
                 .tracking(0.5)
                 .foregroundColor(isSelected ? PulsoTheme.amber : PulsoTheme.ink2)
-                .frame(width: 64, alignment: .leading)
+                .frame(width: 64, height: rowHeight, alignment: .leading)
                 .padding(.leading, 8)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect()
+                }
 
             // Monochrome Gray Waveform representation (fills entire lane)
             ZStack {

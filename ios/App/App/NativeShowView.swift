@@ -44,6 +44,12 @@ struct PulsoRootView: View {
                     .transition(.opacity)
             }
 
+            // Transpose Modal ("TRANSPONER CANCIÓN")
+            if vm.showingTransposeDialog {
+                TransposeDialogView(vm: vm, isPresented: $vm.showingTransposeDialog)
+                    .transition(.opacity)
+            }
+
             // Auth Modal ("ACCESO PULSO")
             if vm.showingAuthModal {
                 AuthModalView(vm: vm)
@@ -62,6 +68,8 @@ struct PulsoRootView: View {
         .animation(.easeInOut(duration: 0.2), value: vm.showingAddSongModal)
         .animation(.easeInOut(duration: 0.2), value: vm.showingSetlistSelectorModal)
         .animation(.easeInOut(duration: 0.2), value: vm.showingUploadSongWizard)
+        .animation(.easeInOut(duration: 0.2), value: vm.showingTransposeDialog)
+        .preferredColorScheme(vm.isDarkMode ? .dark : .light)
         .background(PulsoTheme.bg.ignoresSafeArea())
     }
 }

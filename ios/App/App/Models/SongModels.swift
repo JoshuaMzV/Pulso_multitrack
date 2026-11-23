@@ -345,7 +345,7 @@ enum MockSongData {
 
     static let seOyeSections: [SectionItem] = [
         SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.blue),
-        SectionItem(id: 1, name: "VERSO", startBar: 9, lengthBars: 8, color: PulsoTheme.teal),
+        SectionItem(id: 1, name: "LEVÁNTATE", startBar: 9, lengthBars: 8, color: PulsoTheme.teal),
         SectionItem(id: 2, name: "VERSO", startBar: 17, lengthBars: 8, color: PulsoTheme.teal),
         SectionItem(id: 3, name: "PRECORO", startBar: 25, lengthBars: 8, color: PulsoTheme.amber),
         SectionItem(id: 4, name: "CORO", startBar: 33, lengthBars: 12, color: PulsoTheme.red),
