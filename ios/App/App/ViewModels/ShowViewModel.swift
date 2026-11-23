@@ -179,9 +179,8 @@ final class ShowViewModel: ObservableObject {
         let newSetlist = SetlistItem(
             id: newId,
             name: name,
-            description: description,
-            songs: [],
-            groupId: nil
+            description: description.isEmpty ? nil : description,
+            songs: []
         )
         self.availableSetlists.append(newSetlist)
         self.setlist = newSetlist

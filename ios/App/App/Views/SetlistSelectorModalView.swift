@@ -128,7 +128,7 @@ struct SetlistSelectorModalView: View {
                                 Button(action: {
                                     let trimmed = newName.trimmingCharacters(in: .whitespaces)
                                     guard !trimmed.isEmpty else { return }
-                                    vm.createNewSetlist(name: trimmed, description: newDescription.isEmpty ? nil : newDescription)
+                                    vm.createNewSetlist(name: trimmed, description: newDescription)
                                     showingCreateForm = false
                                     newName = ""
                                     newDescription = ""
