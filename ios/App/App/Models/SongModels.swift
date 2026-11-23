@@ -200,7 +200,7 @@ struct SongItem: Identifiable, Hashable, Codable {
         return id.replacingOccurrences(of: "song_", with: "").replacingOccurrences(of: "cloud_", with: "")
     }
 
-    /// Comprueba si los stems de audio existen físicamente descargados en el iPad
+    /// Comprueba si todos los stems de audio existen físicamente descargados en el iPad con datos válidos
     var isDownloadedLocally: Bool {
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let candidateFolder = folderName
@@ -212,17 +212,28 @@ struct SongItem: Identifiable, Hashable, Codable {
             docDir.appendingPathComponent("Songs").appendingPathComponent(id)
         ]
 
-        for path in candidatePaths {
-            if FileManager.default.fileExists(atPath: path.path) {
-                if let files = try? FileManager.default.contentsOfDirectory(atPath: path.path), !files.isEmpty {
-                    let hasAudio = files.contains {
-                        $0.hasSuffix(".mp3") || $0.hasSuffix(".wav") || $0.hasSuffix(".flac") || $0.hasSuffix(".m4a")
-                    }
-                    if hasAudio { return true }
-                }
-            }
+        guard let resolvedDir = candidatePaths.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            return false
         }
-        return false
+
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: resolvedDir.path), !files.isEmpty else {
+            return false
+        }
+
+        let audioFiles = files.filter { f in
+            let lower = f.lowercased()
+            guard lower.hasSuffix(".mp3") || lower.hasSuffix(".wav") || lower.hasSuffix(".flac") || lower.hasSuffix(".m4a") else { return false }
+            let fullPath = resolvedDir.appendingPathComponent(f).path
+            let size = (try? FileManager.default.attributesOfItem(atPath: fullPath)[.size] as? Int64) ?? 0
+            return size > 1024
+        }
+
+        // Si la canción tiene lista de stems definida, verificar que todos (o la mayoría requerida) existan
+        if !stems.isEmpty {
+            let requiredCount = max(3, stems.count - 1)
+            return audioFiles.count >= requiredCount
+        }
+        return audioFiles.count >= 3
     }
 
     init(id: String, title: String, artist: String, bpm: Double, key: String, timeSignature: String = "4/4", durationSeconds: Double = 270.0, stems: [StemItem] = [], sections: [SectionItem] = [], coverUrl: String? = nil, downloadUrl: String? = nil, folderId: String? = nil, transition: TransitionMode = .stop) {
@@ -386,22 +397,45 @@ enum MockSongData {
         folderId: "Se_Oye_en_las_Naciones___Levantate"
     )
 
+    static let danzareStems: [StemItem] = [
+        StemItem(id: "click", label: "CLICK", category: "click", colorHex: "#9297A0", bus: 1, gainDb: -1.5, filename: "Click Track.mp3", original: "Click Track.mp3"),
+        StemItem(id: "guide", label: "GUIDE", category: "guide", colorHex: "#F0A028", bus: 1, gainDb: -3.0, filename: "Guide.mp3", original: "Guide.mp3"),
+        StemItem(id: "drums", label: "DRUMS", category: "drums", colorHex: "#FF4B33", bus: 0, gainDb: 0.0, filename: "Drums (Live).mp3", original: "Drums (Live).mp3"),
+        StemItem(id: "perc", label: "PERC", category: "drums", colorHex: "#FF4B33", bus: 0, gainDb: -2.0, filename: "Perc.mp3", original: "Perc.mp3"),
+        StemItem(id: "bass", label: "BASS", category: "bass", colorHex: "#3DDC84", bus: 0, gainDb: 0.0, filename: "Bass.mp3", original: "Bass.mp3"),
+        StemItem(id: "piano", label: "PIANO", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Piano.mp3", original: "Piano.mp3"),
+        StemItem(id: "keys_1", label: "KEYS 1", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Keys 1.mp3", original: "Keys 1.mp3"),
+        StemItem(id: "keys_2", label: "KEYS 2", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Keys 2.mp3", original: "Keys 2.mp3"),
+        StemItem(id: "keys_3", label: "KEYS 3", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Keys 3.mp3", original: "Keys 3.mp3"),
+        StemItem(id: "organ", label: "ORGAN", category: "keys", colorHex: "#4DA6FF", bus: 0, gainDb: -2.0, filename: "Organ.mp3", original: "Organ.mp3"),
+        StemItem(id: "eg_1", label: "EG 1", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5, filename: "EG 1.mp3", original: "EG 1.mp3"),
+        StemItem(id: "eg_2", label: "EG 2", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5, filename: "EG 2.mp3", original: "EG 2.mp3"),
+        StemItem(id: "eg_3", label: "EG 3", category: "guitars", colorHex: "#FFBE55", bus: 0, gainDb: -2.5, filename: "EG 3.mp3", original: "EG 3.mp3"),
+        StemItem(id: "choir", label: "CHOIR", category: "vocals", colorHex: "#EC4899", bus: 0, gainDb: -3.0, filename: "Choir.mp3", original: "Choir.mp3"),
+        StemItem(id: "loop", label: "LOOP", category: "other", colorHex: "#C3C7CC", bus: 0, gainDb: -3.0, filename: "Loop.mp3", original: "Loop.mp3")
+    ]
+
+    static let danzareSections: [SectionItem] = [
+        SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.blue, colorHex: "#3B82F6"),
+        SectionItem(id: 1, name: "VERSO 1", startBar: 9, lengthBars: 8, color: PulsoTheme.teal, colorHex: "#14B8A6"),
+        SectionItem(id: 2, name: "CORO", startBar: 17, lengthBars: 8, color: PulsoTheme.red, colorHex: "#EF4444"),
+        SectionItem(id: 3, name: "VERSO 2", startBar: 25, lengthBars: 8, color: PulsoTheme.teal, colorHex: "#10B981"),
+        SectionItem(id: 4, name: "CORO", startBar: 33, lengthBars: 8, color: PulsoTheme.red, colorHex: "#EF4444"),
+        SectionItem(id: 5, name: "PUENTE", startBar: 41, lengthBars: 16, color: PulsoTheme.purple, colorHex: "#8B5CF6"),
+        SectionItem(id: 6, name: "CORO", startBar: 57, lengthBars: 8, color: PulsoTheme.red, colorHex: "#EF4444"),
+        SectionItem(id: 7, name: "FINAL", startBar: 65, lengthBars: 8, color: PulsoTheme.textDim, colorHex: "#6B7280")
+    ]
+
     static let song2 = SongItem(
-        id: "Danzare",
-        title: "Danzare",
-        artist: "Gateway Worship",
-        bpm: 128.0,
+        id: "song_danzare_239d30",
+        title: "Danzaré",
+        artist: "Averly Morillo",
+        bpm: 130.0,
         key: "E",
         timeSignature: "4/4",
         durationSeconds: 310.0,
-        stems: seOyeStems,
-        sections: [
-            SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, color: PulsoTheme.blue),
-            SectionItem(id: 1, name: "VERSO", startBar: 9, lengthBars: 8, color: PulsoTheme.teal),
-            SectionItem(id: 2, name: "CORO", startBar: 17, lengthBars: 8, color: PulsoTheme.red),
-            SectionItem(id: 3, name: "PUENTE", startBar: 25, lengthBars: 8, color: PulsoTheme.purple),
-            SectionItem(id: 4, name: "FINAL", startBar: 33, lengthBars: 8, color: PulsoTheme.textDim)
-        ],
+        stems: danzareStems,
+        sections: danzareSections,
         downloadUrl: "https://stems.tld-list.lat/songs/Danzare_130bpm.zip",
         folderId: "Danzare"
     )

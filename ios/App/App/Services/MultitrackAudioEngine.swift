@@ -21,6 +21,8 @@ final class MultitrackAudioEngine: ObservableObject {
 
     var onSongDurationDetected: ((Double) -> Void)?
 
+    private let rmsLock = NSLock()
+    private var rawRmsLevels: [String: Float] = [:]
     private var playbackTimer: Timer?
     private var songDuration: Double = 240.0
     private var startPlaybackWallTime: Double = 0.0
@@ -54,6 +56,9 @@ final class MultitrackAudioEngine: ObservableObject {
         playerNodes.removeAll()
         audioFiles.removeAll()
         durationPerStem.removeAll()
+        rmsLock.lock()
+        rawRmsLevels.removeAll()
+        rmsLock.unlock()
         rmsLevels.removeAll()
 
         self.songDuration = duration
@@ -190,7 +195,7 @@ final class MultitrackAudioEngine: ObservableObject {
                 engine.attach(playerNode)
                 engine.connect(playerNode, to: engine.mainMixerNode, format: audioFile.processingFormat)
 
-                // Instalar tap para medición de nivel RMS real
+                // Instalar tap para medición de nivel RMS real sin saturar el hilo principal
                 let stemId = stem.id
                 playerNode.installTap(onBus: 0, bufferSize: 2048, format: audioFile.processingFormat) { [weak self] buffer, _ in
                     guard let channelData = buffer.floatChannelData else { return }
@@ -205,8 +210,10 @@ final class MultitrackAudioEngine: ObservableObject {
                     let rms = sqrt(sum / Float(frameLength))
                     let normalized = min(1.0, rms * 3.5)
 
-                    DispatchQueue.main.async {
-                        self?.rmsLevels[stemId] = normalized
+                    if let self = self {
+                        self.rmsLock.lock()
+                        self.rawRmsLevels[stemId] = normalized
+                        self.rmsLock.unlock()
                     }
                 }
 
@@ -301,6 +308,10 @@ final class MultitrackAudioEngine: ObservableObject {
         self.currentSeconds = 0.0
         self.startPlaybackWallTime = 0.0
         stopClockTimer()
+
+        rmsLock.lock()
+        rawRmsLevels.removeAll()
+        rmsLock.unlock()
 
         for key in rmsLevels.keys {
             rmsLevels[key] = 0.0
@@ -422,9 +433,15 @@ final class MultitrackAudioEngine: ObservableObject {
                     return
                 }
 
+                // Publicación agrupada por fotograma (30 Hz) sin saturar el render de SwiftUI
+                self.rmsLock.lock()
+                let snapshotRms = self.rawRmsLevels
+                self.rmsLock.unlock()
+                self.rmsLevels = snapshotRms
+
                 // Master peak calculation a partir de los stems activos
                 var activeRmsSum: Float = 0
-                for (_, level) in self.rmsLevels {
+                for (_, level) in snapshotRms {
                     activeRmsSum = max(activeRmsSum, level)
                 }
                 self.masterRmsL = activeRmsSum

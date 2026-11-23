@@ -146,16 +146,45 @@ final class ShowViewModel: ObservableObject {
     }
 
     func loadSong(_ song: SongItem) {
-        self.currentSong = song
-        self.stems = song.stems
-        self.padKey = song.key
+        var loadedSong = song
+
+        // Asegurar que las secciones y stems nunca estén vacíos
+        if loadedSong.sections.isEmpty {
+            let lowerTitle = loadedSong.title.lowercased()
+            if lowerTitle.contains("danzare") || loadedSong.id.contains("danzare") {
+                loadedSong.sections = MockSongData.danzareSections
+                if loadedSong.stems.isEmpty { loadedSong.stems = MockSongData.danzareStems }
+            } else if lowerTitle.contains("se oye") || loadedSong.id.contains("se_oye") {
+                loadedSong.sections = MockSongData.seOyeSections
+                if loadedSong.stems.isEmpty { loadedSong.stems = MockSongData.seOyeStems }
+            } else {
+                loadedSong.sections = [
+                    SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, colorHex: "#3B82F6"),
+                    SectionItem(id: 1, name: "VERSO", startBar: 9, lengthBars: 8, colorHex: "#14B8A6"),
+                    SectionItem(id: 2, name: "CORO", startBar: 17, lengthBars: 8, colorHex: "#EF4444"),
+                    SectionItem(id: 3, name: "PUENTE", startBar: 25, lengthBars: 8, colorHex: "#8B5CF6"),
+                    SectionItem(id: 4, name: "FINAL", startBar: 33, lengthBars: 8, colorHex: "#6B7280")
+                ]
+            }
+        } else if loadedSong.stems.isEmpty {
+            let lowerTitle = loadedSong.title.lowercased()
+            if lowerTitle.contains("danzare") || loadedSong.id.contains("danzare") {
+                loadedSong.stems = MockSongData.danzareStems
+            } else if lowerTitle.contains("se oye") || loadedSong.id.contains("se_oye") {
+                loadedSong.stems = MockSongData.seOyeStems
+            }
+        }
+
+        self.currentSong = loadedSong
+        self.stems = loadedSong.stems
+        self.padKey = loadedSong.key
         self.currentSeconds = 0.0
         self.currentBar = 1
         self.currentBeat = 1
         self.activeSectionIndex = 0
         self.isPlaying = false
 
-        let idx = setlist.songs.firstIndex(where: { $0.id == song.id }) ?? 0
+        let idx = setlist.songs.firstIndex(where: { $0.id == loadedSong.id }) ?? 0
         setlist.currentIndex = idx
         if idx + 1 < setlist.songs.count {
             nextSong = setlist.songs[idx + 1]
@@ -165,14 +194,14 @@ final class ShowViewModel: ObservableObject {
 
         // Cargar pistas en el motor nativo multitrack
         MultitrackAudioEngine.shared.loadSongTracks(
-            folderName: song.folderName,
-            stems: song.stems,
-            duration: song.durationSeconds
+            folderName: loadedSong.folderName,
+            stems: loadedSong.stems,
+            duration: loadedSong.durationSeconds
         )
 
         // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
-        if !song.isDownloadedLocally {
-            verifyAndDownloadStemsIfNeeded(for: song)
+        if !loadedSong.isDownloadedLocally {
+            verifyAndDownloadStemsIfNeeded(for: loadedSong)
         }
     }
 
@@ -267,16 +296,36 @@ final class ShowViewModel: ObservableObject {
         setlist.songs[idx].transition = modes[nextIdx]
     }
 
-    func addSection(name: String, color: Color) {
-        let lastBar = currentSong.sections.map { $0.startBar + $0.lengthBars }.max() ?? 1
+    func addSection(name: String, colorHex: String = "#3B82F6", startBar: Int? = nil, lengthBars: Int = 8) {
+        let bar: Int
+        if let sb = startBar {
+            bar = max(1, sb)
+        } else {
+            bar = currentSong.sections.map { $0.startBar + $0.lengthBars }.max() ?? 1
+        }
+        let nextId = (currentSong.sections.map { $0.id }.max() ?? -1) + 1
         let newSec = SectionItem(
-            id: currentSong.sections.count,
+            id: nextId,
             name: name,
-            startBar: lastBar,
-            lengthBars: 8,
-            color: color
+            startBar: bar,
+            lengthBars: lengthBars,
+            colorHex: colorHex
         )
         currentSong.sections.append(newSec)
+        currentSong.sections.sort { $0.startBar < $1.startBar }
+
+        if let idx = setlist.songs.firstIndex(where: { $0.id == currentSong.id }) {
+            setlist.songs[idx].sections = currentSong.sections
+        }
+        objectWillChange.send()
+    }
+
+    func removeSection(id: Int) {
+        currentSong.sections.removeAll { $0.id == id }
+        if let idx = setlist.songs.firstIndex(where: { $0.id == currentSong.id }) {
+            setlist.songs[idx].sections = currentSong.sections
+        }
+        objectWillChange.send()
     }
 
     // MARK: - Navigation
@@ -469,6 +518,33 @@ final class ShowViewModel: ObservableObject {
 
     // MARK: - Cloud Catalog & Song Downloading
 
+    /// Elimina los archivos de audio descargados localmente para permitir su re-descarga limpia (sin borrar la canción del setlist)
+    func deleteSongLocalCache(for song: SongItem) {
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let candidateFolder = song.folderName
+        let cleanTitle = song.title.replacingOccurrences(of: " ", with: "_").replacingOccurrences(of: "/", with: "_")
+
+        let candidatePaths = [
+            docDir.appendingPathComponent("Songs").appendingPathComponent(candidateFolder),
+            docDir.appendingPathComponent("Songs").appendingPathComponent(cleanTitle),
+            docDir.appendingPathComponent("Songs").appendingPathComponent(song.id)
+        ]
+
+        for path in candidatePaths {
+            if FileManager.default.fileExists(atPath: path.path) {
+                try? FileManager.default.removeItem(at: path)
+            }
+        }
+
+        if currentSong.id == song.id {
+            MultitrackAudioEngine.shared.stop()
+            MultitrackAudioEngine.shared.loadSongTracks(folderName: song.folderName, stems: [], duration: song.durationSeconds)
+        }
+
+        downloadProgress[song.id] = nil
+        objectWillChange.send()
+    }
+
     /// Carga el catálogo de canciones disponibles en el servidor
     func loadCloudCatalog() async {
         isLoadingCatalog = true
@@ -506,7 +582,8 @@ final class ShowViewModel: ObservableObject {
                     if let urlString = stem.url {
                         let safeUrlStr = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlString
                         if let remoteURL = URL(string: safeUrlStr) ?? URL(string: urlString.replacingOccurrences(of: " ", with: "%20")) {
-                            if !FileManager.default.fileExists(atPath: localStemURL.path) {
+                            let existingSize = (try? FileManager.default.attributesOfItem(atPath: localStemURL.path)[.size] as? Int64) ?? 0
+                            if existingSize <= 1024 {
                                 try await BackendAPIService.shared.downloadStem(from: remoteURL, to: localStemURL)
                             }
                         }
@@ -545,8 +622,11 @@ final class ShowViewModel: ObservableObject {
 
                 // Obtener o inferir secciones correspondientes
                 let songSections: [SectionItem]
-                if cloudSong.title.lowercased().contains("se oye") || cloudSong.id.contains("se_oye") {
+                let lowerTitle = cloudSong.title.lowercased()
+                if lowerTitle.contains("se oye") || cloudSong.id.contains("se_oye") {
                     songSections = MockSongData.seOyeSections
+                } else if lowerTitle.contains("danzare") || cloudSong.id.contains("danzare") {
+                    songSections = MockSongData.danzareSections
                 } else {
                     songSections = [
                         SectionItem(id: 0, name: "INTRO", startBar: 1, lengthBars: 8, colorHex: "#3B82F6"),
@@ -616,7 +696,8 @@ final class ShowViewModel: ObservableObject {
                 for (idx, stem) in song.stems.enumerated() {
                     let stemFilename = stem.filename ?? stem.original ?? "\(stem.label).wav"
                     let localURL = songDir.appendingPathComponent(stemFilename)
-                    if !FileManager.default.fileExists(atPath: localURL.path) {
+                    let existingSize = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int64) ?? 0
+                    if existingSize <= 1024 {
                         let remoteURLStr = "\(BackendAPIService.shared.baseURL)/songs/extracted/\(folderName)/\(stemFilename)"
                         let safeRemote = remoteURLStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? remoteURLStr
                         if let remoteURL = URL(string: safeRemote) ?? URL(string: remoteURLStr.replacingOccurrences(of: " ", with: "%20")) {

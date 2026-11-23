@@ -220,9 +220,11 @@ struct CloudCatalogModalView: View {
     // MARK: - Row View
     @ViewBuilder
     private func cloudSongRow(_ song: CloudSong) -> some View {
-        let isAlreadyInSetlist = vm.setlist.songs.contains(where: {
-            $0.title.lowercased() == song.title.lowercased()
+        let matchingInSetlist = vm.setlist.songs.first(where: {
+            $0.title.lowercased() == song.title.lowercased() || $0.id == song.id
         })
+        let isAlreadyInSetlist = matchingInSetlist != nil
+        let isDownloaded = matchingInSetlist?.isDownloadedLocally ?? false
         let progress = vm.downloadProgress[song.id]
         let isDownloading = progress != nil && progress! < 1.0
 
@@ -281,45 +283,75 @@ struct CloudCatalogModalView: View {
 
             Spacer()
 
-            // Botón de Acción
-            if isDownloading {
-                VStack(spacing: 4) {
-                    ProgressView(value: progress ?? 0.0)
-                        .progressViewStyle(LinearProgressViewStyle(tint: PulsoTheme.amber))
-                        .frame(width: 110)
-                    Text("Descargando \(Int((progress ?? 0.0) * 100))%")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(PulsoTheme.amber)
-                }
-                .padding(.horizontal, 8)
-            } else if isAlreadyInSetlist {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hexString: "#26a69a"))
-                    Text("EN SETLIST")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hexString: "#26a69a"))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(hexString: "#26a69a").opacity(0.12))
-                .cornerRadius(6)
-            } else {
-                Button(action: {
-                    vm.downloadAndAddSong(song)
-                }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 12))
-                        Text("AGREGAR")
-                            .font(.system(size: 10, weight: .black, design: .monospaced))
+            // Botones de Acción (Descargar, Estado y Borrado Local)
+            HStack(spacing: 8) {
+                if isDownloading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: PulsoTheme.amber))
+                            .scaleEffect(0.85)
+                        Text("\(Int((progress ?? 0.0) * 100))%")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(PulsoTheme.amber)
                     }
-                    .foregroundColor(PulsoTheme.bg)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(PulsoTheme.amber)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(PulsoTheme.amber.opacity(0.12))
                     .cornerRadius(6)
+                } else if isAlreadyInSetlist {
+                    HStack(spacing: 6) {
+                        Image(systemName: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
+                            .font(.system(size: 12))
+                            .foregroundColor(isDownloaded ? Color(hexString: "#26a69a") : PulsoTheme.amber)
+                        Text("EN SETLIST")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(isDownloaded ? Color(hexString: "#26a69a") : PulsoTheme.amber)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(isDownloaded ? Color(hexString: "#26a69a").opacity(0.12) : PulsoTheme.amber.opacity(0.12))
+                    .cornerRadius(6)
+
+                    // Si está en el setlist pero no tiene stems locales, permitir descargar
+                    if !isDownloaded, let match = matchingInSetlist {
+                        Button(action: {
+                            vm.verifyAndDownloadStemsIfNeeded(for: match)
+                        }) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundColor(PulsoTheme.amber)
+                        }
+                    }
+
+                    // Botón para borrar archivos locales (sin borrar del setlist) y permitir volver a descargar
+                    if isDownloaded, let match = matchingInSetlist {
+                        Button(action: {
+                            vm.deleteSongLocalCache(for: match)
+                        }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 13))
+                                .foregroundColor(PulsoTheme.red.opacity(0.85))
+                                .frame(width: 28, height: 28)
+                                .background(PulsoTheme.red.opacity(0.12))
+                                .cornerRadius(6)
+                        }
+                    }
+                } else {
+                    Button(action: {
+                        vm.downloadAndAddSong(song)
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 12))
+                            Text("AGREGAR")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                        }
+                        .foregroundColor(PulsoTheme.bg)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(PulsoTheme.amber)
+                        .cornerRadius(6)
+                    }
                 }
             }
         }
