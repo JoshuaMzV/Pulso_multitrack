@@ -86,17 +86,8 @@ struct StemChannelStrip: View {
 
             // 3. Fader & Peak Meter
             HStack(spacing: 4) {
-                // RMS Peak Meter
-                VStack(spacing: 0) {
-                    Spacer()
-                    let meterHeight = max(0, min(140, CGFloat(stem.rms) * 140))
-                    Rectangle()
-                        .fill(stem.rms > 0.8 ? PulsoTheme.red : (stem.rms > 0.5 ? PulsoTheme.amber : PulsoTheme.green))
-                        .frame(width: 4, height: meterHeight)
-                }
-                .frame(width: 4, height: 140)
-                .background(Color.black.opacity(0.5))
-                .cornerRadius(2)
+                // RMS Peak Meter aislado con TimelineView GPU
+                LiveStemVUMeterView(stemId: stem.id, isPlaying: vm.isPlaying)
 
                 // Vertical Tactile Fader
                 VerticalFaderBar(value: Binding(

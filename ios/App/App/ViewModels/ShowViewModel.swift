@@ -68,19 +68,31 @@ final class ShowViewModel: ObservableObject {
     @Published var isLoadingCatalog: Bool = false
     @Published var isDownloadingSong: Bool = false
     @Published var downloadProgress: [String: Double] = [:]
+    @Published var downloadedSongIds: Set<String> = []
 
     // Setlist & Song
     @Published var setlist: SetlistItem = MockSongData.defaultSetlist
     @Published var currentSong: SongItem = MockSongData.song1
     @Published var nextSong: SongItem? = MockSongData.song2
 
-    // Playback State
+    // Playback State (currentSeconds sin @Published para evitar re-render masivo en 60-120fps)
     @Published var isPlaying: Bool = false
-    @Published var currentSeconds: Double = 0.0
     @Published var currentBar: Int = 1
     @Published var currentBeat: Int = 1 // 1..4
     @Published var activeSectionIndex: Int = 0
     @Published var loopSection: Bool = false
+    private var fallbackSeconds: Double = 0.0
+
+    var currentSeconds: Double {
+        get {
+            MultitrackAudioEngine.shared.hasLoadedTracks
+                ? MultitrackAudioEngine.shared.liveSeconds
+                : fallbackSeconds
+        }
+        set {
+            fallbackSeconds = newValue
+        }
+    }
 
     // Master & Pad
     @Published var masterDb: Float = 0.0 {
@@ -88,8 +100,6 @@ final class ShowViewModel: ObservableObject {
             MultitrackAudioEngine.shared.setMasterDb(masterDb)
         }
     }
-    @Published var masterRmsL: Float = 0.0
-    @Published var masterRmsR: Float = 0.0
     @Published var padActive: Bool = false
     @Published var padKey: String = "Bb"
 
@@ -113,9 +123,30 @@ final class ShowViewModel: ObservableObject {
         return max(32, Int(ceil(currentSong.durationSeconds / secondsPerBar)))
     }
 
-    var formattedPlaybackTime: String {
-        let s = Int(max(0, currentSeconds))
+    func isSongDownloaded(_ song: SongItem) -> Bool {
+        downloadedSongIds.contains(song.id)
+    }
+
+    func refreshDownloadedSongsCache() {
+        var ids = Set<String>()
+        if currentSong.isDownloadedLocally {
+            ids.insert(currentSong.id)
+        }
+        for s in setlist.songs where s.isDownloadedLocally {
+            ids.insert(s.id)
+        }
+        if ids != downloadedSongIds {
+            downloadedSongIds = ids
+        }
+    }
+
+    func formattedPlaybackTime(at seconds: Double) -> String {
+        let s = Int(max(0, seconds))
         return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+
+    var formattedPlaybackTime: String {
+        formattedPlaybackTime(at: currentSeconds)
     }
 
     var formattedTotalDuration: String {
@@ -200,7 +231,8 @@ final class ShowViewModel: ObservableObject {
         )
 
         // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
-        if !loadedSong.isDownloadedLocally {
+        refreshDownloadedSongsCache()
+        if !isSongDownloaded(loadedSong) {
             verifyAndDownloadStemsIfNeeded(for: loadedSong)
         }
     }
@@ -366,17 +398,12 @@ final class ShowViewModel: ObservableObject {
 
     func stop() {
         isPlaying = false
-        currentSeconds = 0.0
+        fallbackSeconds = 0.0
         currentBar = 1
         currentBeat = 1
         activeSectionIndex = 0
         MultitrackAudioEngine.shared.stop()
         stopSimulationTimer()
-        for i in stems.indices {
-            stems[i].rms = 0.0
-        }
-        masterRmsL = 0.0
-        masterRmsR = 0.0
     }
 
     func jumpToSection(index: Int) {
@@ -407,6 +434,7 @@ final class ShowViewModel: ObservableObject {
         if MultitrackAudioEngine.shared.hasLoadedTracks {
             MultitrackAudioEngine.shared.seek(to: clamped)
         }
+        objectWillChange.send()
     }
 
     func toggleLoop() {
@@ -542,6 +570,7 @@ final class ShowViewModel: ObservableObject {
         }
 
         downloadProgress[song.id] = nil
+        refreshDownloadedSongsCache()
         objectWillChange.send()
     }
 
@@ -663,6 +692,7 @@ final class ShowViewModel: ObservableObject {
                     stems: newSong.stems,
                     duration: newSong.durationSeconds
                 )
+                self.refreshDownloadedSongsCache()
             } catch {
                 print("Error descargando canción: \(error)")
                 self.isDownloadingSong = false
@@ -714,6 +744,7 @@ final class ShowViewModel: ObservableObject {
                     stems: song.stems,
                     duration: song.durationSeconds
                 )
+                self.refreshDownloadedSongsCache()
             }
         }
     }
@@ -834,69 +865,45 @@ final class ShowViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Internal Simulation Clock (Active until Phase 2 AudioEngine attaches)
+    // MARK: - Low-Frequency Musical Bar/Section Sync (Sin mutar stems/RMS)
 
     private func startSimulationTimer() {
         timer?.invalidate()
-        let interval = 0.05
+        let interval = 0.1
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isPlaying else { return }
+                let nowSec: Double
                 if MultitrackAudioEngine.shared.hasLoadedTracks {
-                    self.currentSeconds = MultitrackAudioEngine.shared.currentSeconds
+                    nowSec = MultitrackAudioEngine.shared.liveSeconds
                 } else {
-                    self.currentSeconds += interval
+                    self.fallbackSeconds += interval
+                    nowSec = self.fallbackSeconds
                 }
 
-                if self.currentSeconds >= self.currentSong.durationSeconds {
+                if nowSec >= self.currentSong.durationSeconds {
                     self.stop()
                     return
                 }
 
                 let beatsPerSecond = self.currentSong.bpm / 60.0
-                let totalBeats = Int(self.currentSeconds * beatsPerSecond)
-                self.currentBar = (totalBeats / 4) + 1
-                self.currentBeat = (totalBeats % 4) + 1
+                let totalBeats = Int(nowSec * beatsPerSecond)
+                let newBar = (totalBeats / 4) + 1
+                let newBeat = (totalBeats % 4) + 1
+                if newBar != self.currentBar { self.currentBar = newBar }
+                if newBeat != self.currentBeat { self.currentBeat = newBeat }
 
-                // Active section tracking
+                // Active section tracking (solo publica si cambia de sección)
                 for (idx, sec) in self.currentSong.sections.enumerated().reversed() {
-                    if self.currentBar >= sec.startBar {
-                        self.activeSectionIndex = idx
-                        if self.loopSection && self.currentBar >= (sec.startBar + sec.lengthBars) {
+                    if newBar >= sec.startBar {
+                        if self.activeSectionIndex != idx {
+                            self.activeSectionIndex = idx
+                        }
+                        if self.loopSection && newBar >= (sec.startBar + sec.lengthBars) {
                             self.jumpToSection(index: idx)
                         }
                         break
                     }
-                }
-
-                if MultitrackAudioEngine.shared.hasLoadedTracks {
-                    // Sincronizar medidores de nivel RMS medidos directamente desde AVAudioEngine
-                    for i in self.stems.indices {
-                        let id = self.stems[i].id
-                        self.stems[i].rms = MultitrackAudioEngine.shared.rmsLevels[id] ?? 0.0
-                    }
-                    self.masterRmsL = MultitrackAudioEngine.shared.masterRmsL
-                    self.masterRmsR = MultitrackAudioEngine.shared.masterRmsR
-                } else if !self.currentSong.isDownloadedLocally {
-                    // Si los stems no están descargados localmente, no mostrar movimiento de audio / medidores
-                    for i in self.stems.indices {
-                        self.stems[i].rms = 0.0
-                    }
-                    self.masterRmsL = 0.0
-                    self.masterRmsR = 0.0
-                } else {
-                    // Simulación ligera cuando no hay audio cargado
-                    for i in self.stems.indices {
-                        if !self.stems[i].muted {
-                            let gainLinear = pow(10.0, self.stems[i].gainDb / 20.0)
-                            self.stems[i].rms = Float.random(in: 0.3...0.85) * min(1.2, gainLinear)
-                        } else {
-                            self.stems[i].rms = 0.0
-                        }
-                    }
-                    let masterLinear = pow(10.0, self.masterDb / 20.0)
-                    self.masterRmsL = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
-                    self.masterRmsR = Float.random(in: 0.35...0.88) * min(1.2, masterLinear)
                 }
             }
         }

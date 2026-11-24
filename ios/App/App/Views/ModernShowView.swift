@@ -217,16 +217,18 @@ struct ModernShowView: View {
             }
             .padding(24)
 
-            // Progress Track (.mo-hero-prog-track)
-            GeometryReader { geo in
-                let pct = vm.currentSong.durationSeconds > 0 ?
-                    CGFloat(vm.currentSeconds / vm.currentSong.durationSeconds) : 0
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.05))
-                    Rectangle()
-                        .fill(PulsoTheme.amber)
-                        .frame(width: max(0, min(geo.size.width, geo.size.width * pct)))
+            // Progress Track (.mo-hero-prog-track) aislado con TimelineView
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !vm.isPlaying)) { _ in
+                GeometryReader { geo in
+                    let pct = vm.currentSong.durationSeconds > 0 ?
+                        CGFloat(vm.currentSeconds / vm.currentSong.durationSeconds) : 0
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.05))
+                        Rectangle()
+                            .fill(PulsoTheme.amber)
+                            .frame(width: max(0, min(geo.size.width, geo.size.width * pct)))
+                    }
                 }
             }
             .frame(height: 4)

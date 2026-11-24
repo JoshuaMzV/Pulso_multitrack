@@ -102,7 +102,7 @@ struct EditionView: View {
                                 // Top row: Title & Key badge (No arrows)
                                 HStack(spacing: 6) {
                                     // Indicador circular de estado de descarga (check verde cuando está lista)
-                                    if song.isDownloadedLocally {
+                                    if vm.isSongDownloaded(song) {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 11))
                                             .foregroundColor(PulsoTheme.green)
@@ -282,7 +282,7 @@ struct EditionView: View {
                     }
 
                     // Estado de descarga de stems
-                    if !vm.currentSong.isDownloadedLocally {
+                    if !vm.isSongDownloaded(vm.currentSong) {
                         Button(action: {
                             vm.verifyAndDownloadStemsIfNeeded(for: vm.currentSong)
                         }) {
@@ -369,70 +369,17 @@ struct EditionView: View {
                     .background(PulsoTheme.blackBox)
                     .border(PulsoTheme.line, width: 0.5)
 
-                // Track Lanes con Scroll Vertical para ver todos los stems cómodamente
-                GeometryReader { geo in
-                    let trackWidth = max(1.0, geo.size.width - 64.0)
-                    let trackRowHeight: CGFloat = 42.0
-                    let currentSec = dragScrubSeconds ?? vm.currentSeconds
-                    let dur = max(1.0, vm.currentSong.durationSeconds)
-                    let pct = CGFloat(max(0.0, min(1.0, currentSec / dur)))
-                    let playheadX = 64.0 + trackWidth * pct
-
-                    ZStack(alignment: .leading) {
-                        // Scroll Vertical de pistas
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(spacing: 1.0) {
-                                ForEach(vm.stems) { stem in
-                                    TimelineTrackRow(
-                                        stem: stem,
-                                        isSelected: stem.id == vm.selectedTrackId,
-                                        rowHeight: trackRowHeight,
-                                        peaks: MultitrackAudioEngine.shared.waveformPeaks[stem.id] ?? [],
-                                        onSelect: {
-                                            vm.selectTrack(id: stem.id)
-                                        }
-                                    )
-                                }
-                            }
-                            .frame(width: geo.size.width)
-                        }
-
-                        // Playhead vertical line (permanece visible sobre todo el área de tracks)
-                        Rectangle()
-                            .fill(PulsoTheme.amber)
-                            .frame(width: 2)
-                            .offset(x: playheadX)
-                            .shadow(color: PulsoTheme.amberGlow, radius: 4, x: 0, y: 0)
-                            .allowsHitTesting(false)
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .contentShape(Rectangle())
-                    .onTapGesture { location in
-                        if location.x >= 64.0 {
-                            let ratio = max(0.0, min(1.0, Double((location.x - 64.0) / trackWidth)))
-                            vm.seek(to: ratio * vm.currentSong.durationSeconds)
-                        }
-                    }
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 8)
-                            .onChanged { value in
-                                // Deslizamiento horizontal: mover línea de tiempo sin lag
-                                if abs(value.translation.width) > abs(value.translation.height) {
-                                    let touchX = value.location.x
-                                    if touchX >= 64.0 {
-                                        let ratio = max(0.0, min(1.0, Double((touchX - 64.0) / trackWidth)))
-                                        dragScrubSeconds = ratio * vm.currentSong.durationSeconds
-                                    }
-                                }
-                            }
-                            .onEnded { value in
-                                if let target = dragScrubSeconds {
-                                    vm.seek(to: target)
-                                    dragScrubSeconds = nil
-                                }
-                            }
-                    )
-                }
+                // Track Lanes con Scroll Vertical + Playhead aislado de 60-120 FPS
+                TimelineTracksContainer(
+                    stems: vm.stems,
+                    selectedTrackId: vm.selectedTrackId,
+                    duration: vm.currentSong.durationSeconds,
+                    isPlaying: vm.isPlaying,
+                    fallbackSeconds: vm.currentSeconds,
+                    dragScrubSeconds: $dragScrubSeconds,
+                    onSelectTrack: { id in vm.selectTrack(id: id) },
+                    onSeek: { sec in vm.seek(to: sec) }
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -711,7 +658,6 @@ struct EditionMixerChannelStrip: View {
     let stem: StemItem
     let isSelected: Bool
     @ObservedObject var vm: ShowViewModel
-    @ObservedObject private var engine = MultitrackAudioEngine.shared
 
     var body: some View {
         VStack(spacing: 5) {
@@ -760,9 +706,8 @@ struct EditionMixerChannelStrip: View {
                 }
                 .frame(height: 120)
 
-                // Medidor VU de audio por pista
-                let stemRms = engine.rmsLevels[stem.id] ?? 0.0
-                FaderVUMeterView(level: stemRms)
+                // Medidor VU de audio por pista (aislado en TimelineView GPU a 30fps)
+                LiveStemVUMeterView(stemId: stem.id, isPlaying: vm.isPlaying)
 
                 // Vertical Tactile Fader
                 VerticalFaderBar(
@@ -772,7 +717,7 @@ struct EditionMixerChannelStrip: View {
                     ),
                     onDragUpdate: { newDb in
                         let anySolo = vm.stems.contains(where: { $0.solo })
-                        engine.updateVolumeDirect(stemId: stem.id, gainDb: newDb, muted: stem.muted, solo: stem.solo, anySolo: anySolo)
+                        MultitrackAudioEngine.shared.updateVolumeDirect(stemId: stem.id, gainDb: newDb, muted: stem.muted, solo: stem.solo, anySolo: anySolo)
                     },
                     onDragEnd: { finalDb in
                         vm.setStemDb(id: stem.id, db: finalDb)
@@ -827,7 +772,6 @@ struct EditionMixerChannelStrip: View {
 
 struct MasterMixerChannelStrip: View {
     @ObservedObject var vm: ShowViewModel
-    @ObservedObject private var engine = MultitrackAudioEngine.shared
 
     var body: some View {
         VStack(spacing: 5) {
@@ -870,13 +814,13 @@ struct MasterMixerChannelStrip: View {
                 }
                 .frame(height: 120)
 
-                // Medidor Estéreo L/R Master
-                FaderVUMeterView(level: engine.masterRmsL, isStereo: true, levelR: engine.masterRmsR)
+                // Medidor Estéreo L/R Master aislado en TimelineView GPU
+                LiveMasterVUMeterView(isPlaying: vm.isPlaying)
 
                 VerticalFaderBar(
                     value: $vm.masterDb,
                     onDragUpdate: { newDb in
-                        engine.setMasterDb(newDb)
+                        MultitrackAudioEngine.shared.setMasterDb(newDb)
                     },
                     onDragEnd: { finalDb in
                         vm.masterDb = finalDb
@@ -908,5 +852,131 @@ struct MasterMixerChannelStrip: View {
                 .stroke(PulsoTheme.line2, lineWidth: 1)
         )
         .cornerRadius(PulsoTheme.radSm)
+    }
+}
+
+// MARK: - Hardware-Accelerated Isolated Playhead & Track Scroll Container
+
+struct TimelineTracksContainer: View {
+    let stems: [StemItem]
+    let selectedTrackId: String
+    let duration: Double
+    let isPlaying: Bool
+    let fallbackSeconds: Double
+    @Binding var dragScrubSeconds: Double?
+    let onSelectTrack: (String) -> Void
+    let onSeek: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let trackWidth = max(1.0, geo.size.width - 64.0)
+            let trackRowHeight: CGFloat = 42.0
+
+            ZStack(alignment: .leading) {
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 1.0) {
+                        ForEach(stems) { stem in
+                            TimelineTrackRow(
+                                stem: stem,
+                                isSelected: stem.id == selectedTrackId,
+                                rowHeight: trackRowHeight,
+                                peaks: MultitrackAudioEngine.shared.waveformPeaks[stem.id] ?? [],
+                                onSelect: { onSelectTrack(stem.id) }
+                            )
+                        }
+                    }
+                    .frame(width: geo.size.width)
+                }
+
+                LivePlayheadView(
+                    isPlaying: isPlaying,
+                    duration: duration,
+                    trackWidth: trackWidth,
+                    fallbackSeconds: fallbackSeconds,
+                    dragScrubSeconds: dragScrubSeconds
+                )
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .contentShape(Rectangle())
+            .onTapGesture { location in
+                if location.x >= 64.0 {
+                    let ratio = max(0.0, min(1.0, Double((location.x - 64.0) / trackWidth)))
+                    onSeek(ratio * duration)
+                }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        if abs(value.translation.width) > abs(value.translation.height) {
+                            let touchX = value.location.x
+                            if touchX >= 64.0 {
+                                let ratio = max(0.0, min(1.0, Double((touchX - 64.0) / trackWidth)))
+                                dragScrubSeconds = ratio * duration
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        if let target = dragScrubSeconds {
+                            onSeek(target)
+                            dragScrubSeconds = nil
+                        }
+                    }
+            )
+        }
+    }
+}
+
+/// Playhead aislado con TimelineView nativo (60-120 FPS ProMotion sin invalidar waveforms)
+struct LivePlayheadView: View {
+    let isPlaying: Bool
+    let duration: Double
+    let trackWidth: CGFloat
+    let fallbackSeconds: Double
+    let dragScrubSeconds: Double?
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || dragScrubSeconds != nil)) { _ in
+            let sec: Double = {
+                if let scrub = dragScrubSeconds { return scrub }
+                return MultitrackAudioEngine.shared.hasLoadedTracks
+                    ? MultitrackAudioEngine.shared.liveSeconds
+                    : fallbackSeconds
+            }()
+            let dur = max(1.0, duration)
+            let pct = CGFloat(max(0.0, min(1.0, sec / dur)))
+            let xPos = 64.0 + trackWidth * pct
+
+            Rectangle()
+                .fill(PulsoTheme.amber)
+                .frame(width: 2)
+                .offset(x: xPos)
+                .shadow(color: PulsoTheme.amberGlow, radius: 4, x: 0, y: 0)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// VU Meter de pista aislado en TimelineView (30 FPS GPU sin invalidar el canal)
+struct LiveStemVUMeterView: View {
+    let stemId: String
+    let isPlaying: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { _ in
+            let level = isPlaying ? MultitrackAudioEngine.shared.liveRms(for: stemId) : 0.0
+            FaderVUMeterView(level: level)
+        }
+    }
+}
+
+/// VU Meter Master estéreo aislado en TimelineView
+struct LiveMasterVUMeterView: View {
+    let isPlaying: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { _ in
+            let level = isPlaying ? MultitrackAudioEngine.shared.liveMasterRms() : 0.0
+            FaderVUMeterView(level: level, isStereo: true, levelR: level)
+        }
     }
 }

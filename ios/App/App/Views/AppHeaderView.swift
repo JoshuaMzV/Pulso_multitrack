@@ -39,16 +39,19 @@ struct AppHeaderView: View {
                         .frame(width: 31, height: 33)
                     }
 
-                    // Time Box (.hdr-time-box)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(vm.formattedPlaybackTime)
-                            .font(.system(size: 13.5, weight: .heavy, design: .monospaced))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text("\(vm.formattedPlaybackTime) / \(vm.formattedTotalDuration)")
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundColor(PulsoTheme.amber)
-                            .lineLimit(1)
+                    // Time Box (.hdr-time-box) actualizado independientemente a 4 Hz
+                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        let liveTime = vm.formattedPlaybackTime(at: vm.currentSeconds)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(liveTime)
+                                .font(.system(size: 13.5, weight: .heavy, design: .monospaced))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Text("\(liveTime) / \(vm.formattedTotalDuration)")
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(PulsoTheme.amber)
+                                .lineLimit(1)
+                        }
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)

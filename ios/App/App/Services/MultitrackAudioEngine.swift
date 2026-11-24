@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Accelerate
 
 /// Motor de audio nativo multitrack sincronizado con AVAudioEngine
 @MainActor
@@ -12,12 +13,36 @@ final class MultitrackAudioEngine: ObservableObject {
     private var durationPerStem: [String: Double] = [:]
 
     @Published var isPlaying: Bool = false
-    @Published var currentSeconds: Double = 0.0
     @Published var hasLoadedTracks: Bool = false
-    @Published var rmsLevels: [String: Float] = [:]
-    @Published var masterRmsL: Float = 0.0
-    @Published var masterRmsR: Float = 0.0
     @Published var waveformPeaks: [String: [Float]] = [:]
+
+    /// Posición base y niveles RMS sin @Published para evitar re-renderizar SwiftUI en cada fotograma
+    private(set) var currentSeconds: Double = 0.0
+
+    var liveSeconds: Double {
+        guard isPlaying, startPlaybackWallTime > 0 else { return currentSeconds }
+        let elapsed = ProcessInfo.processInfo.systemUptime - startPlaybackWallTime
+        return min(songDuration, startPlaybackSeconds + elapsed)
+    }
+
+    func liveRms(for stemId: String) -> Float {
+        guard isPlaying else { return 0.0 }
+        rmsLock.lock()
+        let val = rawRmsLevels[stemId] ?? 0.0
+        rmsLock.unlock()
+        return val
+    }
+
+    func liveMasterRms() -> Float {
+        guard isPlaying else { return 0.0 }
+        rmsLock.lock()
+        var peak: Float = 0.0
+        for (_, v) in rawRmsLevels {
+            if v > peak { peak = v }
+        }
+        rmsLock.unlock()
+        return peak
+    }
 
     var onSongDurationDetected: ((Double) -> Void)?
 
@@ -59,7 +84,6 @@ final class MultitrackAudioEngine: ObservableObject {
         rmsLock.lock()
         rawRmsLevels.removeAll()
         rmsLock.unlock()
-        rmsLevels.removeAll()
 
         self.songDuration = duration
         self.currentSeconds = 0.0
@@ -195,19 +219,15 @@ final class MultitrackAudioEngine: ObservableObject {
                 engine.attach(playerNode)
                 engine.connect(playerNode, to: engine.mainMixerNode, format: audioFile.processingFormat)
 
-                // Instalar tap para medición de nivel RMS real sin saturar el hilo principal
+                // Instalar tap con cálculo SIMD (Accelerate vDSP) sin tocar el hilo principal
                 let stemId = stem.id
                 playerNode.installTap(onBus: 0, bufferSize: 2048, format: audioFile.processingFormat) { [weak self] buffer, _ in
                     guard let channelData = buffer.floatChannelData else { return }
                     let frameLength = Int(buffer.frameLength)
                     guard frameLength > 0 else { return }
 
-                    var sum: Float = 0
-                    for i in 0..<frameLength {
-                        let sample = channelData[0][i]
-                        sum += sample * sample
-                    }
-                    let rms = sqrt(sum / Float(frameLength))
+                    var rms: Float = 0.0
+                    vDSP_rmsqv(channelData[0], 1, &rms, vDSP_Length(frameLength))
                     let normalized = min(1.0, rms * 3.5)
 
                     if let self = self {
@@ -290,8 +310,9 @@ final class MultitrackAudioEngine: ObservableObject {
         }
     }
 
-    /// Pausa la reproducción
+    /// Pausa la reproducción conservando la posición exacta
     func pause() {
+        self.currentSeconds = self.liveSeconds
         for (_, node) in playerNodes {
             node.pause()
         }
@@ -312,12 +333,6 @@ final class MultitrackAudioEngine: ObservableObject {
         rmsLock.lock()
         rawRmsLevels.removeAll()
         rmsLock.unlock()
-
-        for key in rmsLevels.keys {
-            rmsLevels[key] = 0.0
-        }
-        masterRmsL = 0.0
-        masterRmsR = 0.0
     }
 
     /// Salta instantáneamente a una posición en segundos
@@ -419,33 +434,14 @@ final class MultitrackAudioEngine: ObservableObject {
 
     private func startClockTimer() {
         stopClockTimer()
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { [weak self] _ in
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isPlaying else { return }
-
-                // Cálculo exacto a partir del reloj de tiempo del sistema
-                let now = ProcessInfo.processInfo.systemUptime
-                let elapsed = now - self.startPlaybackWallTime
-                self.currentSeconds = min(self.songDuration, self.startPlaybackSeconds + elapsed)
-
-                if self.currentSeconds >= self.songDuration {
+                let nowSec = self.liveSeconds
+                self.currentSeconds = nowSec
+                if nowSec >= self.songDuration {
                     self.stop()
-                    return
                 }
-
-                // Publicación agrupada por fotograma (30 Hz) sin saturar el render de SwiftUI
-                self.rmsLock.lock()
-                let snapshotRms = self.rawRmsLevels
-                self.rmsLock.unlock()
-                self.rmsLevels = snapshotRms
-
-                // Master peak calculation a partir de los stems activos
-                var activeRmsSum: Float = 0
-                for (_, level) in snapshotRms {
-                    activeRmsSum = max(activeRmsSum, level)
-                }
-                self.masterRmsL = activeRmsSum
-                self.masterRmsR = activeRmsSum
             }
         }
     }
