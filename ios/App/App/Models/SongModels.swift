@@ -216,7 +216,7 @@ struct SongItem: Identifiable, Hashable, Codable {
             return false
         }
 
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: resolvedDir.path), !files.isEmpty else {
+        guard let files = try? FileManager.default.subpathsOfDirectory(atPath: resolvedDir.path), !files.isEmpty else {
             return false
         }
 
@@ -230,7 +230,7 @@ struct SongItem: Identifiable, Hashable, Codable {
 
         // Si la canción tiene lista de stems definida, verificar que todos (o la mayoría requerida) existan
         if !stems.isEmpty {
-            let requiredCount = max(3, stems.count - 1)
+            let requiredCount = stems.count
             return audioFiles.count >= requiredCount
         }
         return audioFiles.count >= 3
@@ -253,7 +253,7 @@ struct SongItem: Identifiable, Hashable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, artist, bpm, key, timeSignature, durationSeconds, stems, backendStems, sections, coverUrl, cover, downloadUrl, folderId, transition
+        case id, title, artist, bpm, key, signature, timeSignature, durationSeconds, stems, backendStems, sections, coverUrl, cover, downloadUrl, folderId, transition
     }
 
     init(from decoder: Decoder) throws {
@@ -263,7 +263,7 @@ struct SongItem: Identifiable, Hashable, Codable {
         self.artist = (try? container.decode(String.self, forKey: .artist)) ?? "Desconocido"
         self.bpm = (try? container.decode(Double.self, forKey: .bpm)) ?? 120.0
         self.key = (try? container.decode(String.self, forKey: .key)) ?? "C"
-        self.timeSignature = (try? container.decode(String.self, forKey: .timeSignature)) ?? "4/4"
+        self.timeSignature = (try? container.decode(String.self, forKey: .timeSignature)) ?? (try? container.decode(String.self, forKey: .signature)) ?? "4/4"
         self.durationSeconds = (try? container.decode(Double.self, forKey: .durationSeconds)) ?? 270.0
 
         if let st = try? container.decode([StemItem].self, forKey: .stems) {

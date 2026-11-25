@@ -37,8 +37,9 @@ struct UserProfile {
 
 final class MusicalPosition: ObservableObject {
     @Published private(set) var beatIndex = 0
-    var bar: Int { beatIndex / 4 + 1 }
-    var beat: Int { beatIndex % 4 + 1 }
+    @Published var beatsPerBar = 4
+    var bar: Int { beatIndex / beatsPerBar + 1 }
+    var beat: Int { beatIndex % beatsPerBar + 1 }
 
     func update(_ index: Int) {
         if beatIndex != index { beatIndex = index }
@@ -93,17 +94,15 @@ final class ShowViewModel: ObservableObject {
     @Published var loopSection: Bool = false
     private var fallbackSeconds: Double = 0.0
 
-    private var fallbackAnchor: TimeInterval?
 
     var currentSeconds: Double {
         get {
             MultitrackAudioEngine.shared.hasLoadedTracks
                 ? MultitrackAudioEngine.shared.liveSeconds
-                : min(currentSong.durationSeconds, fallbackSeconds + (fallbackAnchor.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0))
+                : fallbackSeconds
         }
         set {
             fallbackSeconds = newValue
-            if fallbackAnchor != nil { fallbackAnchor = ProcessInfo.processInfo.systemUptime }
         }
     }
 
@@ -130,11 +129,13 @@ final class ShowViewModel: ObservableObject {
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
 
-    var totalSongBars: Int {
-        let bpm = max(30.0, currentSong.bpm)
-        let secondsPerBar = (60.0 / bpm) * 4.0
-        return max(32, Int(ceil(currentSong.durationSeconds / secondsPerBar)))
+    private var beatDuration: Double {
+        let unit = Int(currentSong.timeSignature.split(separator: "/").last ?? "4") ?? 4
+        return 60 / max(1, currentSong.bpm) * 4 / Double(max(1, unit))
     }
+    private var barDuration: Double { beatDuration * Double(musicalPosition.beatsPerBar) }
+    var timelineBarSpan: Double { max(0.001, currentSong.durationSeconds / barDuration) }
+    @Published var transportMessage: String?
 
     func isSongDownloaded(_ song: SongItem) -> Bool {
         downloadedSongIds.contains(song.id)
@@ -142,10 +143,10 @@ final class ShowViewModel: ObservableObject {
 
     func refreshDownloadedSongsCache() {
         var ids = Set<String>()
-        if currentSong.isDownloadedLocally {
+        if MultitrackAudioEngine.shared.hasLoadedTracks {
             ids.insert(currentSong.id)
         }
-        for s in setlist.songs where s.isDownloadedLocally {
+        for s in setlist.songs where s.id != currentSong.id && s.isDownloadedLocally {
             ids.insert(s.id)
         }
         if ids != downloadedSongIds {
@@ -188,7 +189,7 @@ final class ShowViewModel: ObservableObject {
         selectedTrackId = id
     }
 
-    func loadSong(_ song: SongItem) {
+    func loadSong(_ song: SongItem, checkDownload: Bool = true) {
         var loadedSong = song
 
         // Asegurar que las secciones y stems nunca estén vacíos
@@ -218,12 +219,12 @@ final class ShowViewModel: ObservableObject {
             }
         }
 
+        musicalPosition.beatsPerBar = max(1, Int(loadedSong.timeSignature.split(separator: "/").first ?? "4") ?? 4)
         self.currentSong = loadedSong
         self.stems = loadedSong.stems
         self.padKey = loadedSong.key
         self.currentSeconds = 0.0
-        stopSimulationTimer()
-        fallbackAnchor = nil
+        stopPositionTimer()
         musicalPosition.update(0)
         self.activeSectionIndex = 0
         self.isPlaying = false
@@ -245,7 +246,7 @@ final class ShowViewModel: ObservableObject {
 
         // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
         refreshDownloadedSongsCache()
-        if !isSongDownloaded(loadedSong) {
+        if checkDownload && !MultitrackAudioEngine.shared.hasLoadedTracks {
             verifyAndDownloadStemsIfNeeded(for: loadedSong)
         }
     }
@@ -393,48 +394,37 @@ final class ShowViewModel: ObservableObject {
             if isPlaying {
                 MultitrackAudioEngine.shared.pause()
                 isPlaying = false
-                stopSimulationTimer()
+                stopPositionTimer()
             } else {
                 MultitrackAudioEngine.shared.play()
                 isPlaying = MultitrackAudioEngine.shared.isPlaying
-                if isPlaying { startSimulationTimer() }
+                if isPlaying { startPositionTimer() }
             }
         } else {
-            fallbackSeconds = currentSeconds
-            isPlaying.toggle()
-            fallbackAnchor = isPlaying ? ProcessInfo.processInfo.systemUptime : nil
-            if isPlaying {
-                startSimulationTimer()
-            } else {
-                stopSimulationTimer()
-            }
+            transportMessage = "Faltan pistas de esta canción: " + MultitrackAudioEngine.shared.missingTracks.joined(separator: ", ")
         }
     }
 
     func stop() {
         isPlaying = false
         fallbackSeconds = 0.0
-        fallbackAnchor = nil
         musicalPosition.update(0)
         activeSectionIndex = 0
         MultitrackAudioEngine.shared.stop()
-        stopSimulationTimer()
+        stopPositionTimer()
     }
 
     func jumpToSection(index: Int) {
         guard currentSong.sections.indices.contains(index) else { return }
         activeSectionIndex = index
         let sec = currentSong.sections[index]
-        let secondsPerBar = (60.0 / currentSong.bpm) * 4.0
-        seek(to: Double(sec.startBar - 1) * secondsPerBar)
+        seek(to: Double(sec.startBar - 1) * barDuration)
     }
 
     func seek(to seconds: Double) {
         let clamped = max(0.0, min(currentSong.durationSeconds, seconds))
         currentSeconds = clamped
-        let bpm = max(30.0, currentSong.bpm)
-        let secondsPerBeat = 60.0 / bpm
-        let totalBeats = max(0.0, clamped / secondsPerBeat)
+        let totalBeats = max(0.0, clamped / beatDuration)
         musicalPosition.update(Int(totalBeats))
 
         for (idx, sec) in currentSong.sections.enumerated() {
@@ -603,6 +593,7 @@ final class ShowViewModel: ObservableObject {
     /// Descarga los stems de una canción desde el CDN y la agrega al setlist activo
     func downloadAndAddSong(_ cloudSong: CloudSong) {
         guard !isDownloadingSong else { return }
+        let selectionAtStart = currentSong.id
         isDownloadingSong = true
         downloadProgress[cloudSong.id] = 0.05
 
@@ -621,14 +612,22 @@ final class ShowViewModel: ObservableObject {
                     let stemName = stem.filename ?? stem.original ?? "\(stem.label ?? stem.id).wav"
                     let localStemURL = songDir.appendingPathComponent(stemName)
 
-                    if let urlString = stem.url {
-                        let safeUrlStr = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlString
-                        if let remoteURL = URL(string: safeUrlStr) ?? URL(string: urlString.replacingOccurrences(of: " ", with: "%20")) {
-                            let existingSize = (try? FileManager.default.attributesOfItem(atPath: localStemURL.path)[.size] as? Int64) ?? 0
-                            if existingSize <= 1024 {
-                                try await BackendAPIService.shared.downloadStem(from: remoteURL, to: localStemURL)
+                    guard localStemURL.standardizedFileURL.path.hasPrefix(songDir.standardizedFileURL.path + "/") else {
+                        throw APIError.invalidURL
+                    }
+                    let size = (try? localStemURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                    if size <= 1024 {
+                        guard let base = URL(string: BackendAPIService.shared.baseURL) else { throw APIError.invalidURL }
+                        let remote: URL
+                        if let link = stem.url, !link.isEmpty {
+                            guard let resolved = URL(string: link.replacingOccurrences(of: " ", with: "%20"), relativeTo: base) else {
+                                throw APIError.invalidURL
                             }
+                            remote = resolved.absoluteURL
+                        } else {
+                            remote = base.appendingPathComponent("songs/extracted").appendingPathComponent(folderName).appendingPathComponent(stemName)
                         }
+                        try await BackendAPIService.shared.downloadStem(from: remote, to: localStemURL)
                     }
 
                     let progress = Double(index + 1) / total
@@ -684,7 +683,7 @@ final class ShowViewModel: ObservableObject {
                     artist: cloudSong.artist ?? "Desconocido",
                     bpm: cloudSong.bpm ?? 120.0,
                     key: cloudSong.key ?? "C",
-                    timeSignature: "4/4",
+                    timeSignature: cloudSong.timeSignature ?? cloudSong.signature ?? (currentSong.id == cloudSong.id ? currentSong.timeSignature : "4/4"),
                     durationSeconds: self.currentSong.durationSeconds > 0 ? self.currentSong.durationSeconds : 265.0,
                     stems: downloadedStems,
                     sections: songSections,
@@ -695,16 +694,24 @@ final class ShowViewModel: ObservableObject {
                 if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title == newSong.title }) {
                     self.setlist.songs.append(newSong)
                 }
-                self.currentSong = newSong
                 self.downloadProgress[cloudSong.id] = 1.0
                 self.isDownloadingSong = false
-
-                // Cargar stems en motor nativo multitrack
-                MultitrackAudioEngine.shared.loadSongTracks(
-                    folderName: newSong.folderName,
-                    stems: newSong.stems,
-                    duration: newSong.durationSeconds
-                )
+                if self.currentSong.id == selectionAtStart {
+                    var readySong = newSong
+                    if let index = self.setlist.songs.firstIndex(where: { $0.id == newSong.id }) {
+                        let saved = self.setlist.songs[index]
+                        readySong = saved
+                        readySong.folderId = newSong.folderId
+                        readySong.stems = newSong.stems.map { downloaded in
+                            guard var stem = saved.stems.first(where: { $0.id == downloaded.id }) else { return downloaded }
+                            stem.filename = downloaded.filename
+                            stem.original = downloaded.original
+                            return stem
+                        }
+                        self.setlist.songs[index] = readySong
+                    }
+                    self.loadSong(readySong, checkDownload: false)
+                }
                 self.refreshDownloadedSongsCache()
             } catch {
                 print("Error descargando canción: \(error)")
@@ -716,7 +723,7 @@ final class ShowViewModel: ObservableObject {
 
     /// Verifica si los stems de la canción están en el almacenamiento local; si no, los descarga automáticamente del servidor
     func verifyAndDownloadStemsIfNeeded(for song: SongItem) {
-        if song.isDownloadedLocally { return }
+        if song.id == currentSong.id && MultitrackAudioEngine.shared.hasLoadedTracks { return }
 
         Task {
             if self.cloudCatalog.isEmpty {
@@ -727,6 +734,7 @@ final class ShowViewModel: ObservableObject {
             if let cloudSong = self.cloudCatalog.first(where: {
                 $0.id == song.id || $0.title.lowercased() == song.title.lowercased()
             }) {
+                guard self.currentSong.id == song.id else { return }
                 self.downloadAndAddSong(cloudSong)
             } else {
                 // Descargar stems según la estructura de la canción
@@ -751,12 +759,8 @@ final class ShowViewModel: ObservableObject {
                 }
                 self.downloadProgress[song.id] = nil
 
-                // Cargar stems en motor nativo multitrack
-                MultitrackAudioEngine.shared.loadSongTracks(
-                    folderName: song.folderName,
-                    stems: song.stems,
-                    duration: song.durationSeconds
-                )
+                guard self.currentSong.id == song.id else { return }
+                self.loadSong(song, checkDownload: false)
                 self.refreshDownloadedSongsCache()
             }
         }
@@ -880,7 +884,7 @@ final class ShowViewModel: ObservableObject {
 
     // MARK: - Low-Frequency Musical Bar/Section Sync (Sin mutar stems/RMS)
 
-    private func startSimulationTimer() {
+    private func startPositionTimer() {
         timer?.invalidate()
         let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateMusicalPosition() }
@@ -898,9 +902,8 @@ final class ShowViewModel: ObservableObject {
             return
         }
 
-        let beatsPerSecond = currentSong.bpm / 60.0
-        let totalBeats = Int(nowSec * beatsPerSecond)
-        let newBar = (totalBeats / 4) + 1
+        let totalBeats = Int(nowSec / beatDuration)
+        let newBar = (totalBeats / musicalPosition.beatsPerBar) + 1
         musicalPosition.update(totalBeats)
 
         // Active section tracking (solo publica si cambia de sección)
@@ -917,7 +920,7 @@ final class ShowViewModel: ObservableObject {
         }
     }
 
-    private func stopSimulationTimer() {
+    private func stopPositionTimer() {
         timer?.invalidate()
         timer = nil
     }

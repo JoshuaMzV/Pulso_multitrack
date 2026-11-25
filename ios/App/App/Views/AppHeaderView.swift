@@ -23,6 +23,10 @@ struct AppHeaderView: View {
                         .frame(width: 36, height: 33)
                     }
 
+                    .alert("Carga de stems", isPresented: Binding(get: { vm.transportMessage != nil }, set: { if !$0 { vm.transportMessage = nil } })) {
+                        Button("Aceptar") { vm.transportMessage = nil }
+                    } message: { Text(vm.transportMessage ?? "") }
+
                     // Stop Button (.hdr-stop-btn)
                     Button(action: { vm.stop() }) {
                         ZStack {
@@ -190,7 +194,7 @@ private struct BeatIndicator: View {
 
             // 4 Beat Dots (.beat-dots)
             HStack(spacing: 4) {
-                ForEach(1...4, id: \.self) { beat in
+                ForEach(1...position.beatsPerBar, id: \.self) { beat in
                     Circle()
                         .fill(position.beat == beat ?
                               (beat == 1 ? PulsoTheme.amber : PulsoTheme.green) :

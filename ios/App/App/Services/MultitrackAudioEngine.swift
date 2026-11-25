@@ -20,24 +20,28 @@ final class MultitrackAudioEngine: ObservableObject {
     private(set) var currentSeconds: Double = 0.0
 
     var liveSeconds: Double {
-        guard isPlaying, let anchor = startHostTime else { return currentSeconds }
-        let now = mach_absolute_time()
-        let elapsed = now > anchor ? AVAudioTime.seconds(forHostTime: now - anchor) : 0
-        return min(songDuration, currentSeconds + elapsed)
+        guard isPlaying, let node = clockNode, let render = node.lastRenderTime,
+              let player = node.playerTime(forNodeTime: render), player.sampleRate > 0 else {
+            return currentSeconds
+        }
+        return min(songDuration, currentSeconds + max(0, Double(player.sampleTime) / player.sampleRate))
     }
 
-    func meterSnapshot() -> [String: Float] {
-        rmsLock.lock()
-        defer { rmsLock.unlock() }
-        return rawRmsLevels
+    func meterSnapshot() -> [String?: Float] {
+        peakLock.lock()
+        defer { peakLock.unlock() }
+        let snapshot = pendingPeaks
+        pendingPeaks.removeAll(keepingCapacity: true)
+        return snapshot
     }
 
     var onSongDurationDetected: ((Double) -> Void)?
-
-    private let rmsLock = NSLock()
-    private var rawRmsLevels: [String: Float] = [:]
+    private let peakLock = NSLock()
+    private var pendingPeaks: [String?: Float] = [:]
+    private(set) var missingTracks: [String] = []
+    private var hasMasterTap = false
     private var songDuration: Double = 240.0
-    private var startHostTime: UInt64?
+    private var clockNode: AVAudioPlayerNode?
     private let transportQueue = DispatchQueue(label: "pulso.transport", qos: .userInitiated)
     private var pendingStart: DispatchWorkItem?
     private var transportRevision: UInt = 0
@@ -67,6 +71,7 @@ final class MultitrackAudioEngine: ObservableObject {
     func loadSongTracks(folderName: String, stems: [StemItem], duration: Double) {
         stop()
 
+        missingTracks = stems.map { $0.label }
         waveformQueue.cancelAllOperations()
         waveformRevision &+= 1
         waveformPeaks.removeAll()
@@ -81,9 +86,9 @@ final class MultitrackAudioEngine: ObservableObject {
         playerNodes.removeAll()
         audioFiles.removeAll()
         durationPerStem.removeAll()
-        rmsLock.lock()
-        rawRmsLevels.removeAll()
-        rmsLock.unlock()
+        peakLock.lock()
+        pendingPeaks.removeAll()
+        peakLock.unlock()
 
         self.songDuration = duration
         self.currentSeconds = 0.0
@@ -110,7 +115,7 @@ final class MultitrackAudioEngine: ObservableObject {
         }
 
         // Buscar archivos para cada stem
-        guard let dirContents = try? FileManager.default.contentsOfDirectory(atPath: songDir.path) else {
+        guard var dirContents = try? FileManager.default.subpathsOfDirectory(atPath: songDir.path) else {
             self.hasLoadedTracks = false
             return
         }
@@ -121,6 +126,7 @@ final class MultitrackAudioEngine: ObservableObject {
             // Candidatos de nombre de archivo para este stem
             var candidateFilenames: [String] = []
             if let f = stem.filename {
+                candidateFilenames.append(f)
                 candidateFilenames.append((f as NSString).lastPathComponent)
             }
             if let o = stem.original {
@@ -185,17 +191,21 @@ final class MultitrackAudioEngine: ObservableObject {
                 candidateFilenames.append("Loop.mp3")
             }
 
+            let declared = [stem.filename, stem.original].compactMap { $0 }.filter { !$0.isEmpty }
+            if !declared.isEmpty { candidateFilenames = declared }
             var fileURL: URL?
             for candidate in candidateFilenames {
                 let lowerCand = candidate.lowercased()
-                if let matched = dirContents.first(where: { $0.lowercased() == lowerCand }) {
+                let basename = (lowerCand as NSString).lastPathComponent
+                if let matched = dirContents.first(where: { $0.lowercased() == lowerCand }) ??
+                    dirContents.first(where: { ($0 as NSString).lastPathComponent.lowercased() == basename }) {
                     fileURL = songDir.appendingPathComponent(matched)
                     break
                 }
             }
 
             // Búsqueda por categoría o etiqueta si no hubo match directo
-            if fileURL == nil {
+            if fileURL == nil && declared.isEmpty {
                 let stemCat = stem.category.lowercased()
                 let stemLab = stem.label.lowercased()
                 if let matched = dirContents.first(where: { f in
@@ -214,29 +224,13 @@ final class MultitrackAudioEngine: ObservableObject {
 
             do {
                 let audioFile = try AVAudioFile(forReading: url)
+                dirContents.removeAll { songDir.appendingPathComponent($0) == url }
                 let playerNode = AVAudioPlayerNode()
 
                 engine.attach(playerNode)
                 engine.connect(playerNode, to: engine.mainMixerNode, format: audioFile.processingFormat)
 
-                // Instalar tap con cálculo SIMD (Accelerate vDSP) sin tocar el hilo principal
-                let stemId = stem.id
-                playerNode.installTap(onBus: 0, bufferSize: 2048, format: audioFile.processingFormat) { [weak self] buffer, _ in
-                    guard let channelData = buffer.floatChannelData else { return }
-                    let frameLength = Int(buffer.frameLength)
-                    guard frameLength > 0 else { return }
-
-                    var rms: Float = 0.0
-                    vDSP_rmsqv(channelData[0], 1, &rms, vDSP_Length(frameLength))
-                    let normalized = min(1.0, rms * 3.5)
-
-                    if let self = self {
-                        self.rmsLock.lock()
-                        self.rawRmsLevels[stemId] = normalized
-                        self.rmsLock.unlock()
-                    }
-                }
-
+                installPeakTap(on: playerNode, id: stem.id)
                 playerNodes[stem.id] = playerNode
                 audioFiles[stem.id] = audioFile
                 let durationSeconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
@@ -252,7 +246,8 @@ final class MultitrackAudioEngine: ObservableObject {
             }
         }
 
-        self.hasLoadedTracks = !playerNodes.isEmpty
+        missingTracks = stems.filter { playerNodes[$0.id] == nil }.map { $0.label }
+        self.hasLoadedTracks = !playerNodes.isEmpty && missingTracks.isEmpty
 
         // Detección precisa de la duración máxima de los stems
         if let maxDuration = durationPerStem.values.max(), maxDuration > 1.0 {
@@ -263,6 +258,10 @@ final class MultitrackAudioEngine: ObservableObject {
 
         // Iniciar el motor de audio si está listo
         if hasLoadedTracks {
+            if !hasMasterTap {
+                installPeakTap(on: engine.mainMixerNode, id: nil)
+                hasMasterTap = true
+            }
             do {
                 if !engine.isRunning {
                     try engine.start()
@@ -271,6 +270,21 @@ final class MultitrackAudioEngine: ObservableObject {
             } catch {
                 print("[PULSO AUDIO] Error iniciando AVAudioEngine: \(error)")
             }
+        }
+    }
+
+    private func installPeakTap(on node: AVAudioNode, id: String?) {
+        node.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let self = self, let data = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+            var peak: Float = 0
+            for channel in 0..<Int(buffer.format.channelCount) {
+                var channelPeak: Float = 0
+                vDSP_maxmgv(data[channel], vDSP_Stride(buffer.stride), &channelPeak, vDSP_Length(buffer.frameLength))
+                peak = max(peak, channelPeak)
+            }
+            self.peakLock.lock()
+            self.pendingPeaks[id] = max(self.pendingPeaks[id] ?? 0, peak)
+            self.peakLock.unlock()
         }
     }
 
@@ -289,24 +303,27 @@ final class MultitrackAudioEngine: ObservableObject {
             let tracks = playerNodes.compactMap { id, node in
                 audioFiles[id].map { (node, $0) }
             }
+            let reference = durationPerStem.max { $0.value < $1.value }.flatMap { playerNodes[$0.key] }
+            let lead = max(0.04, 3 * AVAudioSession.sharedInstance().ioBufferDuration)
             isPlaying = true
             let work = DispatchWorkItem { [weak self] in
                 var scheduled: [AVAudioPlayerNode] = []
+                for (node, _) in tracks { node.stop() }
                 for (node, file) in tracks {
-                    node.stop()
                     let frame = AVAudioFramePosition(position * file.processingFormat.sampleRate)
                     guard frame < file.length else { continue }
                     node.scheduleSegment(file, startingFrame: frame,
                                          frameCount: AVAudioFrameCount(file.length - frame), at: nil)
+                    node.prepare(withFrameCount: AVAudioFrameCount(min(8192, file.length - frame)))
                     scheduled.append(node)
                 }
                 // El cursor y todos los stems comparten el mismo instante de arranque.
-                let anchor = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.04)
+                let anchor = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: lead)
                 let time = AVAudioTime(hostTime: anchor)
                 for node in scheduled { node.play(at: time) }
                 DispatchQueue.main.async {
                     guard let self = self, self.transportRevision == revision else { return }
-                    self.startHostTime = anchor
+                    self.clockNode = reference
                     self.pendingStart = nil
                 }
             }
@@ -334,9 +351,9 @@ final class MultitrackAudioEngine: ObservableObject {
         self.isPlaying = false
         self.currentSeconds = 0.0
 
-        rmsLock.lock()
-        rawRmsLevels.removeAll()
-        rmsLock.unlock()
+        peakLock.lock()
+        pendingPeaks.removeAll()
+        peakLock.unlock()
     }
 
     /// Salta instantáneamente a una posición en segundos
@@ -431,6 +448,6 @@ final class MultitrackAudioEngine: ObservableObject {
         transportRevision &+= 1
         pendingStart?.cancel()
         pendingStart = nil
-        startHostTime = nil
+        clockNode = nil
     }
 }

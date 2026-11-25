@@ -406,13 +406,12 @@ struct EditionView: View {
 
             GeometryReader { geo in
                 let bandWidth = geo.size.width
-                let maxSectionBar = vm.currentSong.sections.map { $0.startBar + $0.lengthBars }.max() ?? 1
-                let totBars = max(CGFloat(max(32, maxSectionBar)), CGFloat(vm.totalSongBars))
+                let totBars = CGFloat(vm.timelineBarSpan)
 
                 ZStack(alignment: .leading) {
                     ForEach(vm.currentSong.sections) { sec in
                         let xPos = (CGFloat(max(0, sec.startBar - 1)) / totBars) * bandWidth
-                        let secWidth = max(16.0, (CGFloat(sec.lengthBars) / totBars) * bandWidth)
+                        let secWidth = max(0.0, (CGFloat(sec.lengthBars) / totBars) * bandWidth)
                         let isSelected = vm.activeSectionIndex == sec.id
 
                         ZStack {
@@ -456,12 +455,11 @@ struct EditionView: View {
 
             GeometryReader { geo in
                 let bandWidth = geo.size.width
-                let maxSectionBar = vm.currentSong.sections.map { $0.startBar + $0.lengthBars }.max() ?? 1
-                let totBars = max(CGFloat(max(32, maxSectionBar)), CGFloat(vm.totalSongBars))
+                let totBars = CGFloat(vm.timelineBarSpan)
                 let barWidth = bandWidth / totBars
 
                 Canvas { context, size in
-                    let totalB = Int(totBars)
+                    let totalB = Int(ceil(totBars))
                     for barIndex in 0..<totalB {
                         let x = CGFloat(barIndex) * barWidth
                         let isMajor = (barIndex % 4 == 0) // Compás 1, 5, 9, 13...
@@ -970,12 +968,9 @@ struct LivePlayheadView: View {
 /// Un solo muestreo del mezclador para todos los medidores visibles.
 @MainActor
 private enum MeterUpdates {
-    static let frames = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common)
+    static let frames = Timer.publish(every: 0.10, on: .main, in: .common)
         .autoconnect()
-        .map { _ -> (stems: [String: Float], master: Float) in
-            let levels = MultitrackAudioEngine.shared.meterSnapshot()
-            return (levels, levels.values.max() ?? 0)
-        }
+        .map { _ in MultitrackAudioEngine.shared.meterSnapshot() }
         .share()
 }
 
@@ -999,21 +994,28 @@ struct LiveMasterVUMeterView: View {
 private struct LiveMeter: View {
     let stemId: String?
     let isPlaying: Bool
-    @State private var segments = 0
+    @State private var band = 0
+    @State private var clipUntil = Date.distantPast
 
     var body: some View {
-        let level = Float(isPlaying ? segments : 0) / 20
-        let meter = FaderVUMeterView(level: level, isStereo: stemId == nil, levelR: level)
+        let colors: [Color] = [.secondary.opacity(0.25), .green.opacity(0.5), .green, .red]
+        let labels = ["Silencio", "Bajo", "Señal", "Saturación"]
+        let index = isPlaying ? band : 0
+        let light = Capsule().fill(colors[index])
+            .frame(width: 6, height: 18)
+            .frame(height: 120, alignment: .center)
+            .accessibilityLabel("Nivel de audio")
+            .accessibilityValue(labels[index])
         if isPlaying {
-            meter.onReceive(MeterUpdates.frames) { frame in
-                let rms = stemId.map { frame.stems[$0] ?? 0 } ?? frame.master
-                // Ataque inmediato y caída gradual entre bloques de audio.
-                let lit = max(segments - 3, Int(ceil(rms * 20)))
-                if lit != segments { segments = lit }
+            light.onReceive(MeterUpdates.frames) { peaks in
+                let peak = peaks[stemId] ?? 0
+                if peak >= 1 { clipUntil = Date().addingTimeInterval(0.6) }
+                let next = Date() < clipUntil ? 3 : peak >= 0.1 ? 2 : peak >= 0.001 ? 1 : 0
+                if band != next { band = next }
             }
-            .onDisappear { segments = 0 }
+            .onDisappear { band = 0; clipUntil = .distantPast }
         } else {
-            meter
+            light
         }
     }
 }

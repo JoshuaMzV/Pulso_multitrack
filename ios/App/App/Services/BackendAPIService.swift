@@ -47,6 +47,8 @@ struct CloudSong: Codable, Identifiable {
     let id: String
     let title: String
     let artist: String?
+    let timeSignature: String?
+    let signature: String?
     let bpm: Double?
     let key: String?
     let filename: String?
