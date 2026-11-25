@@ -118,21 +118,24 @@ final class MultitrackAudioEngine: ObservableObject {
         }
 
         missingTracks = stems.filter { s in !resolvedPairs.contains(where: { $0.stem.id == s.id }) }.map { $0.label }
-        guard !resolvedPairs.isEmpty, missingTracks.isEmpty else {
+        guard !resolvedPairs.isEmpty else {
             self.isPreparingAudio = false
             return
         }
+
+        let resolvedStemIds = resolvedPairs.map { $0.stem.id }
+        self.stemIds = resolvedStemIds
+        self.stemIndexById = Dictionary(uniqueKeysWithValues: resolvedStemIds.enumerated().map { ($0.element, $0.offset) })
 
         let pcmDir = songDir.appendingPathComponent(".pulso_pcm")
         try? FileManager.default.createDirectory(at: pcmDir, withIntermediateDirectories: true)
         self.isPreparingAudio = true
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            var preparedFiles = Array<URL?>(repeating: nil, count: stems.count)
-            var extractedPeaks: [String: [Float]] = [:]
+            var preparedMap: [Int: (stem: StemItem, url: URL, peaks: [Float])] = [:]
 
-            await withTaskGroup(of: (Int, String, URL?, [Float]).self) { group in
-                for pair in resolvedPairs {
+            await withTaskGroup(of: (Int, StemItem, URL?, [Float]).self) { group in
+                for (seqIdx, pair) in resolvedPairs.enumerated() {
                     let cafURL = pcmDir.appendingPathComponent("\(pair.stem.id).caf")
                     let peaksURL = pcmDir.appendingPathComponent("\(pair.stem.id).peaks")
                     group.addTask {
@@ -142,36 +145,32 @@ final class MultitrackAudioEngine: ObservableObject {
                             peaksURL: peaksURL
                         )
                         let valid = FileManager.default.fileExists(atPath: cafURL.path) ? cafURL : nil
-                        return (pair.index, pair.stem.id, valid, peaks)
+                        return (seqIdx, pair.stem, valid, peaks)
                     }
                 }
-                for await (idx, stemId, cafURL, peaks) in group {
-                    preparedFiles[idx] = cafURL
-                    extractedPeaks[stemId] = peaks
+                for await (seqIdx, stem, cafURL, peaks) in group {
+                    if let url = cafURL {
+                        preparedMap[seqIdx] = (stem, url, peaks)
+                    }
                 }
             }
 
-            let validURLs = preparedFiles.compactMap { $0 }
-            guard validURLs.count == stems.count else {
-                await MainActor.run { [weak self] in
-                    guard let self = self, self.loadRevision == revision else { return }
-                    self.isPreparingAudio = false
-                    self.hasLoadedTracks = false
-                }
-                return
-            }
-
-            // Abrir archivos PCM uniformes y calcular duración exacta
+            let orderedPrepared = resolvedPairs.indices.compactMap { preparedMap[$0] }
             var openFiles: [AVAudioFile] = []
+            var loadedStems: [StemItem] = []
+            var extractedPeaks: [String: [Float]] = [:]
             var maxFrames: AVAudioFramePosition = 0
-            for url in validURLs {
-                if let af = try? AVAudioFile(forReading: url) {
+
+            for item in orderedPrepared {
+                if let af = try? AVAudioFile(forReading: item.url), af.length > 0 {
                     openFiles.append(af)
+                    loadedStems.append(item.stem)
+                    extractedPeaks[item.stem.id] = item.peaks
                     if af.length > maxFrames { maxFrames = af.length }
                 }
             }
 
-            guard openFiles.count == stems.count, maxFrames > 0 else {
+            guard !openFiles.isEmpty, maxFrames > 0 else {
                 await MainActor.run { [weak self] in
                     guard let self = self, self.loadRevision == revision else { return }
                     self.isPreparingAudio = false
@@ -188,7 +187,10 @@ final class MultitrackAudioEngine: ObservableObject {
                     newDeck.shutdown()
                     return
                 }
-                self.attachDeck(newDeck, stems: stems, detectedDuration: detectedDuration, peaks: extractedPeaks)
+                let finalIds = loadedStems.map { $0.id }
+                self.stemIds = finalIds
+                self.stemIndexById = Dictionary(uniqueKeysWithValues: finalIds.enumerated().map { ($0.element, $0.offset) })
+                self.attachDeck(newDeck, stems: loadedStems, detectedDuration: detectedDuration, peaks: extractedPeaks)
             }
         }
     }
@@ -223,6 +225,7 @@ final class MultitrackAudioEngine: ObservableObject {
 
         do {
             if !engine.isRunning {
+                engine.prepare()
                 try engine.start()
             }
             self.hasLoadedTracks = true
@@ -236,6 +239,9 @@ final class MultitrackAudioEngine: ObservableObject {
 
     private func teardownDeck() {
         stopEndCheckTimer()
+        if engine.isRunning {
+            engine.stop()
+        }
         if let node = sourceNode {
             engine.disconnectNodeOutput(node)
             engine.detach(node)
@@ -404,25 +410,22 @@ final class MultitrackAudioEngine: ObservableObject {
     /// Convierte el stem origen a PCM lineal uniforme (.caf 44.1kHz Int16) y extrae peaks de forma de onda en una sola pasada
     private nonisolated static func convertToUniformPCMIfNeeded(sourceURL: URL, cafURL: URL, peaksURL: URL, targetPoints: Int = 220) -> [Float] {
         let cafSize = (try? FileManager.default.attributesOfItem(atPath: cafURL.path)[.size] as? Int64) ?? 0
-        if cafSize > 4096 {
+        if cafSize > 4096, let af = try? AVAudioFile(forReading: cafURL), af.length > 0 {
             if let data = try? Data(contentsOf: peaksURL),
                let cachedPeaks = try? JSONDecoder().decode([Float].self, from: data),
                !cachedPeaks.isEmpty {
                 return cachedPeaks
             }
-            if let af = try? AVAudioFile(forReading: cafURL) {
-                let peaks = extractPeaksFast(from: af, targetPoints: targetPoints)
-                if let encoded = try? JSONEncoder().encode(peaks) {
-                    try? encoded.write(to: peaksURL)
-                }
-                return peaks
+            let peaks = extractPeaksFast(from: af, targetPoints: targetPoints)
+            if let encoded = try? JSONEncoder().encode(peaks) {
+                try? encoded.write(to: peaksURL)
             }
+            return peaks
         }
 
         guard let inFile = try? AVAudioFile(forReading: sourceURL) else { return [] }
         let inFormat = inFile.processingFormat
-        guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 2, interleaved: true),
-              let workFloatFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2),
+        guard let workFloatFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2),
               let converter = AVAudioConverter(from: inFormat, to: workFloatFormat) else {
             return []
         }
@@ -440,10 +443,6 @@ final class MultitrackAudioEngine: ObservableObject {
             AVLinearPCMIsNonInterleaved: false
         ]
 
-        guard let outFile = try? AVAudioFile(forWriting: tmpURL, settings: outSettings, commonFormat: .pcmFormatFloat32, interleaved: false) else {
-            return []
-        }
-
         let inChunk: AVAudioFrameCount = 16384
         let outCapacity = AVAudioFrameCount(Double(inChunk) * (sampleRate / max(8000.0, inFormat.sampleRate)) + 1024)
         guard let inBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: inChunk),
@@ -458,59 +457,67 @@ final class MultitrackAudioEngine: ObservableObject {
         var writtenFrames: Int64 = 0
         var inputDone = false
 
-        while !inputDone {
-            outBuffer.frameLength = 0
-            var convError: NSError?
-            let status = converter.convert(to: outBuffer, error: &convError) { _, outStatus in
-                if inputDone {
-                    outStatus.pointee = .endOfStream
-                    return nil
-                }
-                do {
-                    try inFile.read(into: inBuffer, frameCount: inChunk)
-                    if inBuffer.frameLength == 0 {
+        // Scope dedicado para cerrar y hacer flush del header CAF antes de mover el archivo
+        do {
+            let outFile = try AVAudioFile(forWriting: tmpURL, settings: outSettings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            while !inputDone {
+                outBuffer.frameLength = 0
+                var convError: NSError?
+                let status = converter.convert(to: outBuffer, error: &convError) { _, outStatus in
+                    if inputDone {
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    do {
+                        try inFile.read(into: inBuffer, frameCount: inChunk)
+                        if inBuffer.frameLength == 0 {
+                            inputDone = true
+                            outStatus.pointee = .endOfStream
+                            return nil
+                        }
+                        outStatus.pointee = .haveData
+                        return inBuffer
+                    } catch {
                         inputDone = true
                         outStatus.pointee = .endOfStream
                         return nil
                     }
-                    outStatus.pointee = .haveData
-                    return inBuffer
-                } catch {
-                    inputDone = true
-                    outStatus.pointee = .endOfStream
-                    return nil
                 }
-            }
 
-            if status == .error { break }
-            if outBuffer.frameLength > 0 {
-                try? outFile.write(from: outBuffer)
-                if let chData = outBuffer.floatChannelData {
-                    let n = Int(outBuffer.frameLength)
-                    let ptr = chData[0]
-                    var offset = 0
-                    while offset < n {
-                        let binIdx = min(targetPoints - 1, Int((writtenFrames + Int64(offset)) / framesPerBin))
-                        let binEnd = min(n, offset + Int(framesPerBin))
-                        var segPeak: Float = 0
-                        vDSP_maxmgv(ptr.advanced(by: offset), 1, &segPeak, vDSP_Length(binEnd - offset))
-                        peaks[binIdx] = max(peaks[binIdx], min(1.0, segPeak * 1.6))
-                        offset = binEnd
+                if status == .error { break }
+                if outBuffer.frameLength > 0 {
+                    try? outFile.write(from: outBuffer)
+                    if let chData = outBuffer.floatChannelData {
+                        let n = Int(outBuffer.frameLength)
+                        let ptr = chData[0]
+                        var offset = 0
+                        while offset < n {
+                            let binIdx = min(targetPoints - 1, Int((writtenFrames + Int64(offset)) / framesPerBin))
+                            let binEnd = min(n, offset + Int(framesPerBin))
+                            var segPeak: Float = 0
+                            vDSP_maxmgv(ptr.advanced(by: offset), 1, &segPeak, vDSP_Length(binEnd - offset))
+                            peaks[binIdx] = max(peaks[binIdx], min(1.0, segPeak * 1.6))
+                            offset = binEnd
+                        }
                     }
+                    writtenFrames += Int64(outBuffer.frameLength)
                 }
-                writtenFrames += Int64(outBuffer.frameLength)
+                if status == .endOfStream { break }
             }
-            if status == .endOfStream { break }
+        } catch {
+            try? FileManager.default.removeItem(at: tmpURL)
+            return []
         }
 
-        if FileManager.default.fileExists(atPath: tmpURL.path) {
+        if writtenFrames > 0, FileManager.default.fileExists(atPath: tmpURL.path) {
             try? FileManager.default.removeItem(at: cafURL)
             try? FileManager.default.moveItem(at: tmpURL, to: cafURL)
+        } else {
+            try? FileManager.default.removeItem(at: tmpURL)
         }
         if let encoded = try? JSONEncoder().encode(peaks) {
             try? encoded.write(to: peaksURL)
         }
-        _ = outFormat
         return peaks
     }
 

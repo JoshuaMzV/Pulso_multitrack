@@ -691,14 +691,15 @@ final class ShowViewModel: ObservableObject {
                     folderId: folderName
                 )
 
-                if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title == newSong.title }) {
+                if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title.lowercased() == newSong.title.lowercased() }) {
                     self.setlist.songs.append(newSong)
                 }
-                self.downloadProgress[cloudSong.id] = 1.0
+                self.downloadProgress[cloudSong.id] = nil
+                self.downloadProgress[selectionAtStart] = nil
                 self.isDownloadingSong = false
-                if self.currentSong.id == selectionAtStart {
+                if self.currentSong.id == selectionAtStart || self.currentSong.title.lowercased() == newSong.title.lowercased() {
                     var readySong = newSong
-                    if let index = self.setlist.songs.firstIndex(where: { $0.id == newSong.id }) {
+                    if let index = self.setlist.songs.firstIndex(where: { $0.id == newSong.id || $0.title.lowercased() == newSong.title.lowercased() }) {
                         let saved = self.setlist.songs[index]
                         readySong = saved
                         readySong.folderId = newSong.folderId
@@ -721,6 +722,7 @@ final class ShowViewModel: ObservableObject {
                 print("Error descargando canción: \(error)")
                 self.isDownloadingSong = false
                 self.downloadProgress[cloudSong.id] = nil
+                self.downloadProgress[selectionAtStart] = nil
             }
         }
     }
