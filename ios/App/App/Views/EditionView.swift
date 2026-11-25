@@ -1,9 +1,10 @@
 import SwiftUI
+import Combine
 
 /// Exact replica of `.edition-layout` from PULSO Web (Image 3)
 struct EditionView: View {
     @ObservedObject var vm: ShowViewModel
-    @State private var dragScrubSeconds: Double? = nil
+    @State private var scrub = TimelineScrub()
 
     var body: some View {
         ZStack {
@@ -51,6 +52,8 @@ struct EditionView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PulsoTheme.bg.ignoresSafeArea())
+        .onDisappear { scrub.seconds = nil }
+        .onChange(of: vm.currentSong.id) { _ in scrub.seconds = nil }
     }
 
     // MARK: - 1. Sidebar (.edition-sidebar)
@@ -375,8 +378,10 @@ struct EditionView: View {
                     selectedTrackId: vm.selectedTrackId,
                     duration: vm.currentSong.durationSeconds,
                     isPlaying: vm.isPlaying,
-                    fallbackSeconds: vm.currentSeconds,
-                    dragScrubSeconds: $dragScrubSeconds,
+                    position: { vm.currentSeconds },
+                    pausedSeconds: vm.isPlaying ? nil : vm.currentSeconds,
+                    scrub: scrub,
+                    audio: .shared,
                     onSelectTrack: { id in vm.selectTrack(id: id) },
                     onSeek: { sec in vm.seek(to: sec) }
                 )
@@ -488,12 +493,12 @@ struct EditionView: View {
                     DragGesture(minimumDistance: 4)
                         .onChanged { value in
                             let ratio = max(0.0, min(1.0, Double(value.location.x / max(1.0, bandWidth))))
-                            dragScrubSeconds = ratio * vm.currentSong.durationSeconds
+                            scrub.seconds = ratio * vm.currentSong.durationSeconds
                         }
                         .onEnded { value in
-                            if let target = dragScrubSeconds {
+                            if let target = scrub.seconds {
                                 vm.seek(to: target)
-                                dragScrubSeconds = nil
+                                scrub.seconds = nil
                             }
                         }
                 )
@@ -531,7 +536,7 @@ struct EditionView: View {
             // Horizontal rack of mixer channels with STICKY Master overlay (traspasa y flota encima como en navegador)
             ZStack(alignment: .trailing) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    LazyHStack(spacing: 8) {
                         ForEach(vm.stems) { stem in
                             EditionMixerChannelStrip(
                                 stem: stem,
@@ -593,8 +598,8 @@ struct TimelineTrackRow: View {
                 .font(.system(size: 9, weight: .heavy))
                 .tracking(0.5)
                 .foregroundColor(isSelected ? PulsoTheme.amber : PulsoTheme.ink2)
-                .frame(width: 64, height: rowHeight, alignment: .leading)
                 .padding(.leading, 8)
+                .frame(width: 64, height: rowHeight, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     onSelect()
@@ -862,8 +867,10 @@ struct TimelineTracksContainer: View {
     let selectedTrackId: String
     let duration: Double
     let isPlaying: Bool
-    let fallbackSeconds: Double
-    @Binding var dragScrubSeconds: Double?
+    let position: () -> Double
+    let pausedSeconds: Double?
+    let scrub: TimelineScrub
+    @ObservedObject var audio: MultitrackAudioEngine
     let onSelectTrack: (String) -> Void
     let onSeek: (Double) -> Void
 
@@ -874,13 +881,13 @@ struct TimelineTracksContainer: View {
 
             ZStack(alignment: .leading) {
                 ScrollView(.vertical, showsIndicators: true) {
-                    VStack(spacing: 1.0) {
+                    LazyVStack(spacing: 1.0) {
                         ForEach(stems) { stem in
                             TimelineTrackRow(
                                 stem: stem,
                                 isSelected: stem.id == selectedTrackId,
                                 rowHeight: trackRowHeight,
-                                peaks: MultitrackAudioEngine.shared.waveformPeaks[stem.id] ?? [],
+                                peaks: audio.waveformPeaks[stem.id] ?? [],
                                 onSelect: { onSelectTrack(stem.id) }
                             )
                         }
@@ -892,8 +899,9 @@ struct TimelineTracksContainer: View {
                     isPlaying: isPlaying,
                     duration: duration,
                     trackWidth: trackWidth,
-                    fallbackSeconds: fallbackSeconds,
-                    dragScrubSeconds: dragScrubSeconds
+                    position: position,
+                    pausedSeconds: pausedSeconds,
+                    scrub: scrub
                 )
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -911,14 +919,14 @@ struct TimelineTracksContainer: View {
                             let touchX = value.location.x
                             if touchX >= 64.0 {
                                 let ratio = max(0.0, min(1.0, Double((touchX - 64.0) / trackWidth)))
-                                dragScrubSeconds = ratio * duration
+                                scrub.seconds = ratio * duration
                             }
                         }
                     }
                     .onEnded { _ in
-                        if let target = dragScrubSeconds {
+                        if let target = scrub.seconds {
                             onSeek(target)
-                            dragScrubSeconds = nil
+                            scrub.seconds = nil
                         }
                     }
             )
@@ -926,21 +934,24 @@ struct TimelineTracksContainer: View {
     }
 }
 
-/// Playhead aislado con TimelineView nativo (60-120 FPS ProMotion sin invalidar waveforms)
+/// Solo el cursor observa la posición provisional del gesto.
+final class TimelineScrub: ObservableObject {
+    @Published var seconds: Double?
+}
+
 struct LivePlayheadView: View {
     let isPlaying: Bool
     let duration: Double
     let trackWidth: CGFloat
-    let fallbackSeconds: Double
-    let dragScrubSeconds: Double?
+    let position: () -> Double
+    let pausedSeconds: Double?
+    @ObservedObject var scrub: TimelineScrub
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || dragScrubSeconds != nil)) { _ in
+        TimelineView(.animation(minimumInterval: nil, paused: !isPlaying || scrub.seconds != nil)) { _ in
             let sec: Double = {
-                if let scrub = dragScrubSeconds { return scrub }
-                return MultitrackAudioEngine.shared.hasLoadedTracks
-                    ? MultitrackAudioEngine.shared.liveSeconds
-                    : fallbackSeconds
+                if let scrub = scrub.seconds { return scrub }
+                return pausedSeconds ?? position()
             }()
             let dur = max(1.0, duration)
             let pct = CGFloat(max(0.0, min(1.0, sec / dur)))
@@ -956,27 +967,53 @@ struct LivePlayheadView: View {
     }
 }
 
-/// VU Meter de pista aislado en TimelineView (30 FPS GPU sin invalidar el canal)
+/// Un solo muestreo del mezclador para todos los medidores visibles.
+@MainActor
+private enum MeterUpdates {
+    static let frames = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common)
+        .autoconnect()
+        .map { _ -> (stems: [String: Float], master: Float) in
+            let levels = MultitrackAudioEngine.shared.meterSnapshot()
+            return (levels, levels.values.max() ?? 0)
+        }
+        .share()
+}
+
 struct LiveStemVUMeterView: View {
     let stemId: String
     let isPlaying: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { _ in
-            let level = isPlaying ? MultitrackAudioEngine.shared.liveRms(for: stemId) : 0.0
-            FaderVUMeterView(level: level)
-        }
+        LiveMeter(stemId: stemId, isPlaying: isPlaying)
     }
 }
 
-/// VU Meter Master estéreo aislado en TimelineView
 struct LiveMasterVUMeterView: View {
     let isPlaying: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { _ in
-            let level = isPlaying ? MultitrackAudioEngine.shared.liveMasterRms() : 0.0
-            FaderVUMeterView(level: level, isStereo: true, levelR: level)
+        LiveMeter(stemId: nil, isPlaying: isPlaying)
+    }
+}
+
+private struct LiveMeter: View {
+    let stemId: String?
+    let isPlaying: Bool
+    @State private var segments = 0
+
+    var body: some View {
+        let level = Float(isPlaying ? segments : 0) / 20
+        let meter = FaderVUMeterView(level: level, isStereo: stemId == nil, levelR: level)
+        if isPlaying {
+            meter.onReceive(MeterUpdates.frames) { frame in
+                let rms = stemId.map { frame.stems[$0] ?? 0 } ?? frame.master
+                // Ataque inmediato y caída gradual entre bloques de audio.
+                let lit = max(segments - 3, Int(ceil(rms * 20)))
+                if lit != segments { segments = lit }
+            }
+            .onDisappear { segments = 0 }
+        } else {
+            meter
         }
     }
 }

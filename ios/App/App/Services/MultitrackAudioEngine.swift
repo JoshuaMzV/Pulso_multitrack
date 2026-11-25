@@ -20,38 +20,34 @@ final class MultitrackAudioEngine: ObservableObject {
     private(set) var currentSeconds: Double = 0.0
 
     var liveSeconds: Double {
-        guard isPlaying, startPlaybackWallTime > 0 else { return currentSeconds }
-        let elapsed = ProcessInfo.processInfo.systemUptime - startPlaybackWallTime
-        return min(songDuration, startPlaybackSeconds + elapsed)
+        guard isPlaying, let anchor = startHostTime else { return currentSeconds }
+        let now = mach_absolute_time()
+        let elapsed = now > anchor ? AVAudioTime.seconds(forHostTime: now - anchor) : 0
+        return min(songDuration, currentSeconds + elapsed)
     }
 
-    func liveRms(for stemId: String) -> Float {
-        guard isPlaying else { return 0.0 }
+    func meterSnapshot() -> [String: Float] {
         rmsLock.lock()
-        let val = rawRmsLevels[stemId] ?? 0.0
-        rmsLock.unlock()
-        return val
-    }
-
-    func liveMasterRms() -> Float {
-        guard isPlaying else { return 0.0 }
-        rmsLock.lock()
-        var peak: Float = 0.0
-        for (_, v) in rawRmsLevels {
-            if v > peak { peak = v }
-        }
-        rmsLock.unlock()
-        return peak
+        defer { rmsLock.unlock() }
+        return rawRmsLevels
     }
 
     var onSongDurationDetected: ((Double) -> Void)?
 
     private let rmsLock = NSLock()
     private var rawRmsLevels: [String: Float] = [:]
-    private var playbackTimer: Timer?
     private var songDuration: Double = 240.0
-    private var startPlaybackWallTime: Double = 0.0
-    private var startPlaybackSeconds: Double = 0.0
+    private var startHostTime: UInt64?
+    private let transportQueue = DispatchQueue(label: "pulso.transport", qos: .userInitiated)
+    private var pendingStart: DispatchWorkItem?
+    private var transportRevision: UInt = 0
+    private var waveformRevision: UInt = 0
+    private let waveformQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .utility
+        return queue
+    }()
 
     private init() {
         setupAudioSession()
@@ -70,6 +66,10 @@ final class MultitrackAudioEngine: ObservableObject {
     /// Prepara y conecta todas las pistas de audio de la canción desde almacenamiento local
     func loadSongTracks(folderName: String, stems: [StemItem], duration: Double) {
         stop()
+
+        waveformQueue.cancelAllOperations()
+        waveformRevision &+= 1
+        waveformPeaks.removeAll()
 
         // Limpiar nodos previos
         for (id, node) in playerNodes {
@@ -246,7 +246,7 @@ final class MultitrackAudioEngine: ObservableObject {
                 updateVolume(stem: stem, soloActive: false)
 
                 // Extraer forma de onda real en segundo plano
-                extractWaveformPeaks(stemId: stem.id, file: audioFile)
+                extractWaveformPeaks(stemId: stem.id, url: url)
             } catch {
                 print("[PULSO AUDIO] Error cargando pista \(stem.label) (\(url.lastPathComponent)): \(error)")
             }
@@ -283,28 +283,35 @@ final class MultitrackAudioEngine: ObservableObject {
                 try engine.start()
             }
 
-            let hostTime = mach_absolute_time() + UInt64(0.04 * 1_000_000_000)
-            let audioTime = AVAudioTime(hostTime: hostTime)
-
-            for (stemId, node) in playerNodes {
-                guard let file = audioFiles[stemId] else { continue }
-                let sampleRate = file.processingFormat.sampleRate
-                let startFrame = AVAudioFramePosition(currentSeconds * sampleRate)
-                let totalFrames = file.length
-
-                if startFrame < totalFrames {
-                    let frameCount = AVAudioFrameCount(totalFrames - startFrame)
+            invalidateStart()
+            let revision = transportRevision
+            let position = currentSeconds
+            let tracks = playerNodes.compactMap { id, node in
+                audioFiles[id].map { (node, $0) }
+            }
+            isPlaying = true
+            let work = DispatchWorkItem { [weak self] in
+                var scheduled: [AVAudioPlayerNode] = []
+                for (node, file) in tracks {
                     node.stop()
-                    node.scheduleSegment(file, startingFrame: startFrame, frameCount: frameCount, at: nil)
-                    node.play(at: audioTime)
+                    let frame = AVAudioFramePosition(position * file.processingFormat.sampleRate)
+                    guard frame < file.length else { continue }
+                    node.scheduleSegment(file, startingFrame: frame,
+                                         frameCount: AVAudioFrameCount(file.length - frame), at: nil)
+                    scheduled.append(node)
+                }
+                // El cursor y todos los stems comparten el mismo instante de arranque.
+                let anchor = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.04)
+                let time = AVAudioTime(hostTime: anchor)
+                for node in scheduled { node.play(at: time) }
+                DispatchQueue.main.async {
+                    guard let self = self, self.transportRevision == revision else { return }
+                    self.startHostTime = anchor
+                    self.pendingStart = nil
                 }
             }
-
-            self.isPlaying = true
-            self.startPlaybackSeconds = currentSeconds
-            self.startPlaybackWallTime = ProcessInfo.processInfo.systemUptime
-
-            startClockTimer()
+            pendingStart = work
+            transportQueue.async(execute: work)
         } catch {
             print("[PULSO AUDIO] Fallo al reproducir: \(error)")
         }
@@ -313,22 +320,19 @@ final class MultitrackAudioEngine: ObservableObject {
     /// Pausa la reproducción conservando la posición exacta
     func pause() {
         self.currentSeconds = self.liveSeconds
-        for (_, node) in playerNodes {
-            node.pause()
-        }
+        invalidateStart()
+        let nodes = Array(playerNodes.values)
+        transportQueue.async { for node in nodes { node.pause() } }
         self.isPlaying = false
-        stopClockTimer()
     }
 
     /// Detiene y rebobina a 0
     func stop() {
-        for (_, node) in playerNodes {
-            node.stop()
-        }
+        invalidateStart()
+        let nodes = Array(playerNodes.values)
+        transportQueue.sync { for node in nodes { node.stop() } }
         self.isPlaying = false
         self.currentSeconds = 0.0
-        self.startPlaybackWallTime = 0.0
-        stopClockTimer()
 
         rmsLock.lock()
         rawRmsLevels.removeAll()
@@ -339,8 +343,6 @@ final class MultitrackAudioEngine: ObservableObject {
     func seek(to seconds: Double) {
         let clamped = max(0.0, min(songDuration, seconds))
         self.currentSeconds = clamped
-        self.startPlaybackSeconds = clamped
-        self.startPlaybackWallTime = ProcessInfo.processInfo.systemUptime
 
         if isPlaying {
             play()
@@ -380,16 +382,11 @@ final class MultitrackAudioEngine: ObservableObject {
     }
 
     /// Extrae los peaks reales de amplitud PCM para representar la forma de onda
-    private func extractWaveformPeaks(stemId: String, file: AVAudioFile, targetPoints: Int = 220) {
-        Task.detached(priority: .utility) {
+    private func extractWaveformPeaks(stemId: String, url: URL, targetPoints: Int = 220) {
+        let revision = waveformRevision
+        waveformQueue.addOperation { [weak self] in
+            guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return }
             let totalFrames = file.length
-            guard totalFrames > 0 else {
-                await MainActor.run { [weak self] in
-                    self?.waveformPeaks[stemId] = []
-                }
-                return
-            }
-
             let framesPerSegment = max(1, totalFrames / Int64(targetPoints))
             let chunkSize = AVAudioFrameCount(min(framesPerSegment, 1024))
             guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunkSize) else {
@@ -398,8 +395,6 @@ final class MultitrackAudioEngine: ObservableObject {
 
             var peaks: [Float] = []
             peaks.reserveCapacity(targetPoints)
-
-            let originalPos = file.framePosition
 
             for i in 0..<targetPoints {
                 let framePos = min(totalFrames - Int64(chunkSize), Int64(i) * framesPerSegment)
@@ -424,30 +419,18 @@ final class MultitrackAudioEngine: ObservableObject {
                 }
             }
 
-            file.framePosition = originalPos
-
-            await MainActor.run { [weak self] in
-                self?.waveformPeaks[stemId] = peaks
+            let result = peaks
+            DispatchQueue.main.async {
+                guard let self = self, self.waveformRevision == revision else { return }
+                self.waveformPeaks[stemId] = result
             }
         }
     }
 
-    private func startClockTimer() {
-        stopClockTimer()
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self, self.isPlaying else { return }
-                let nowSec = self.liveSeconds
-                self.currentSeconds = nowSec
-                if nowSec >= self.songDuration {
-                    self.stop()
-                }
-            }
-        }
-    }
-
-    private func stopClockTimer() {
-        playbackTimer?.invalidate()
-        playbackTimer = nil
+    private func invalidateStart() {
+        transportRevision &+= 1
+        pendingStart?.cancel()
+        pendingStart = nil
+        startHostTime = nil
     }
 }

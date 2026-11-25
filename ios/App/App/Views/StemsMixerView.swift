@@ -33,7 +33,7 @@ struct StemsMixerView: View {
 
             // Horizontal rack of stem channels
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                LazyHStack(spacing: 8) {
                     ForEach(vm.stems) { stem in
                         StemChannelStrip(stem: stem, vm: vm)
                     }

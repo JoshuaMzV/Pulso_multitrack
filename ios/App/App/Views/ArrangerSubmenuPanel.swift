@@ -72,7 +72,7 @@ struct ArrangerSubmenuPanel: View {
                     HStack(spacing: 4) {
                         Image(systemName: insertAtCurrentBar ? "pin.fill" : "arrow.right.to.line")
                             .font(.system(size: 9))
-                        Text(insertAtCurrentBar ? "Compás actual (c.\(vm.currentBar))" : "Al final (c.\(nextEndBar))")
+                        ArrangerPositionLabel(position: vm.musicalPosition, atCursor: insertAtCurrentBar, endBar: nextEndBar)
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                     }
                     .foregroundColor(PulsoTheme.amber)
@@ -197,5 +197,15 @@ struct ArrangerSubmenuPanel: View {
         )
         .cornerRadius(10)
         .shadow(color: Color.black.opacity(0.75), radius: 24, x: 0, y: 12)
+    }
+}
+
+private struct ArrangerPositionLabel: View {
+    @ObservedObject var position: MusicalPosition
+    let atCursor: Bool
+    let endBar: Int
+
+    var body: some View {
+        Text(atCursor ? "Compás actual (c.\(position.bar))" : "Al final (c.\(endBar))")
     }
 }

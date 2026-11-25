@@ -65,23 +65,7 @@ struct AppHeaderView: View {
                     .cornerRadius(6)
 
                     // Bar Box (.hdr-bar-box)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("COMPÁS \(vm.currentBar).\(vm.currentBeat)")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(PulsoTheme.ink)
-                            .lineLimit(1)
-
-                        // 4 Beat Dots (.beat-dots)
-                        HStack(spacing: 4) {
-                            ForEach(1...4, id: \.self) { beat in
-                                Circle()
-                                    .fill(vm.currentBeat == beat ?
-                                          (beat == 1 ? PulsoTheme.amber : PulsoTheme.green) :
-                                          PulsoTheme.dim)
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
-                    }
+                    BeatIndicator(position: vm.musicalPosition)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
                     .frame(minWidth: 86)
@@ -191,5 +175,29 @@ struct AppHeaderView: View {
     private func formatTime(_ sec: Double) -> String {
         let s = Int(max(0, sec))
         return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct BeatIndicator: View {
+    @ObservedObject var position: MusicalPosition
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("COMPÁS \(position.bar).\(position.beat)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(PulsoTheme.ink)
+                .lineLimit(1)
+
+            // 4 Beat Dots (.beat-dots)
+            HStack(spacing: 4) {
+                ForEach(1...4, id: \.self) { beat in
+                    Circle()
+                        .fill(position.beat == beat ?
+                              (beat == 1 ? PulsoTheme.amber : PulsoTheme.green) :
+                              PulsoTheme.dim)
+                        .frame(width: 6, height: 6)
+                }
+            }
+        }
     }
 }

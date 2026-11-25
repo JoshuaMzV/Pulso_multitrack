@@ -35,6 +35,16 @@ struct UserProfile {
     static let `default` = UserProfile(username: "admin_josh", role: .admin, avatar: "AD")
 }
 
+final class MusicalPosition: ObservableObject {
+    @Published private(set) var beatIndex = 0
+    var bar: Int { beatIndex / 4 + 1 }
+    var beat: Int { beatIndex % 4 + 1 }
+
+    func update(_ index: Int) {
+        if beatIndex != index { beatIndex = index }
+    }
+}
+
 @MainActor
 final class ShowViewModel: ObservableObject {
     // Mode
@@ -77,20 +87,23 @@ final class ShowViewModel: ObservableObject {
 
     // Playback State (currentSeconds sin @Published para evitar re-render masivo en 60-120fps)
     @Published var isPlaying: Bool = false
-    @Published var currentBar: Int = 1
-    @Published var currentBeat: Int = 1 // 1..4
+    let musicalPosition = MusicalPosition()
+    var currentBar: Int { musicalPosition.bar }
     @Published var activeSectionIndex: Int = 0
     @Published var loopSection: Bool = false
     private var fallbackSeconds: Double = 0.0
+
+    private var fallbackAnchor: TimeInterval?
 
     var currentSeconds: Double {
         get {
             MultitrackAudioEngine.shared.hasLoadedTracks
                 ? MultitrackAudioEngine.shared.liveSeconds
-                : fallbackSeconds
+                : min(currentSong.durationSeconds, fallbackSeconds + (fallbackAnchor.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0))
         }
         set {
             fallbackSeconds = newValue
+            if fallbackAnchor != nil { fallbackAnchor = ProcessInfo.processInfo.systemUptime }
         }
     }
 
@@ -161,15 +174,14 @@ final class ShowViewModel: ObservableObject {
     }
 
     init() {
-        self.loadSong(MockSongData.song1)
-        self.checkSessionWithBackend()
-        self.loadSetlistsFromBackend()
-
         // Sincronizar duración real detectada desde archivos de audio en disco
         MultitrackAudioEngine.shared.onSongDurationDetected = { [weak self] detectedDuration in
             guard let self = self else { return }
             self.currentSong.durationSeconds = detectedDuration
         }
+        self.loadSong(MockSongData.song1)
+        self.checkSessionWithBackend()
+        self.loadSetlistsFromBackend()
     }
 
     func selectTrack(id: String) {
@@ -210,8 +222,9 @@ final class ShowViewModel: ObservableObject {
         self.stems = loadedSong.stems
         self.padKey = loadedSong.key
         self.currentSeconds = 0.0
-        self.currentBar = 1
-        self.currentBeat = 1
+        stopSimulationTimer()
+        fallbackAnchor = nil
+        musicalPosition.update(0)
         self.activeSectionIndex = 0
         self.isPlaying = false
 
@@ -383,11 +396,13 @@ final class ShowViewModel: ObservableObject {
                 stopSimulationTimer()
             } else {
                 MultitrackAudioEngine.shared.play()
-                isPlaying = true
-                startSimulationTimer()
+                isPlaying = MultitrackAudioEngine.shared.isPlaying
+                if isPlaying { startSimulationTimer() }
             }
         } else {
+            fallbackSeconds = currentSeconds
             isPlaying.toggle()
+            fallbackAnchor = isPlaying ? ProcessInfo.processInfo.systemUptime : nil
             if isPlaying {
                 startSimulationTimer()
             } else {
@@ -399,8 +414,8 @@ final class ShowViewModel: ObservableObject {
     func stop() {
         isPlaying = false
         fallbackSeconds = 0.0
-        currentBar = 1
-        currentBeat = 1
+        fallbackAnchor = nil
+        musicalPosition.update(0)
         activeSectionIndex = 0
         MultitrackAudioEngine.shared.stop()
         stopSimulationTimer()
@@ -410,7 +425,6 @@ final class ShowViewModel: ObservableObject {
         guard currentSong.sections.indices.contains(index) else { return }
         activeSectionIndex = index
         let sec = currentSong.sections[index]
-        currentBar = sec.startBar
         let secondsPerBar = (60.0 / currentSong.bpm) * 4.0
         seek(to: Double(sec.startBar - 1) * secondsPerBar)
     }
@@ -421,8 +435,7 @@ final class ShowViewModel: ObservableObject {
         let bpm = max(30.0, currentSong.bpm)
         let secondsPerBeat = 60.0 / bpm
         let totalBeats = max(0.0, clamped / secondsPerBeat)
-        currentBar = Int(totalBeats / 4.0) + 1
-        currentBeat = Int(totalBeats.truncatingRemainder(dividingBy: 4.0)) + 1
+        musicalPosition.update(Int(totalBeats))
 
         for (idx, sec) in currentSong.sections.enumerated() {
             if currentBar >= sec.startBar && currentBar < (sec.startBar + sec.lengthBars) {
@@ -869,42 +882,37 @@ final class ShowViewModel: ObservableObject {
 
     private func startSimulationTimer() {
         timer?.invalidate()
-        let interval = 0.1
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self, self.isPlaying else { return }
-                let nowSec: Double
-                if MultitrackAudioEngine.shared.hasLoadedTracks {
-                    nowSec = MultitrackAudioEngine.shared.liveSeconds
-                } else {
-                    self.fallbackSeconds += interval
-                    nowSec = self.fallbackSeconds
-                }
+        let ticker = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMusicalPosition() }
+        }
+        timer = ticker
+        RunLoop.main.add(ticker, forMode: .common)
+    }
 
-                if nowSec >= self.currentSong.durationSeconds {
-                    self.stop()
-                    return
-                }
+    private func updateMusicalPosition() {
+        guard isPlaying else { return }
+        let nowSec = currentSeconds
 
-                let beatsPerSecond = self.currentSong.bpm / 60.0
-                let totalBeats = Int(nowSec * beatsPerSecond)
-                let newBar = (totalBeats / 4) + 1
-                let newBeat = (totalBeats % 4) + 1
-                if newBar != self.currentBar { self.currentBar = newBar }
-                if newBeat != self.currentBeat { self.currentBeat = newBeat }
+        if nowSec >= currentSong.durationSeconds {
+            stop()
+            return
+        }
 
-                // Active section tracking (solo publica si cambia de sección)
-                for (idx, sec) in self.currentSong.sections.enumerated().reversed() {
-                    if newBar >= sec.startBar {
-                        if self.activeSectionIndex != idx {
-                            self.activeSectionIndex = idx
-                        }
-                        if self.loopSection && newBar >= (sec.startBar + sec.lengthBars) {
-                            self.jumpToSection(index: idx)
-                        }
-                        break
-                    }
+        let beatsPerSecond = currentSong.bpm / 60.0
+        let totalBeats = Int(nowSec * beatsPerSecond)
+        let newBar = (totalBeats / 4) + 1
+        musicalPosition.update(totalBeats)
+
+        // Active section tracking (solo publica si cambia de sección)
+        for (idx, sec) in currentSong.sections.enumerated().reversed() {
+            if newBar >= sec.startBar {
+                if activeSectionIndex != idx {
+                    activeSectionIndex = idx
                 }
+                if loopSection && newBar >= (sec.startBar + sec.lengthBars) {
+                    jumpToSection(index: idx)
+                }
+                break
             }
         }
     }

@@ -184,7 +184,9 @@ struct ModernShowView: View {
 
                     // Bottom Right (.mo-hc-bottom-right)
                     VStack(alignment: .trailing, spacing: 10) {
-                        Text(vm.formattedRemainingTime)
+                        TimelineView(.animation(minimumInterval: 0.25, paused: !vm.isPlaying)) { _ in
+                            Text(vm.formattedRemainingTime)
+                        }
                             .font(.system(size: 48, weight: .black, design: .monospaced))
                             .foregroundColor(PulsoTheme.amber)
                             .lineLimit(1)
