@@ -711,6 +711,10 @@ final class ShowViewModel: ObservableObject {
                         self.setlist.songs[index] = readySong
                     }
                     self.loadSong(readySong, checkDownload: false)
+                } else {
+                    Task.detached(priority: .utility) {
+                        await MultitrackAudioEngine.prewarmSongCache(folderName: newSong.folderName, stems: newSong.stems)
+                    }
                 }
                 self.refreshDownloadedSongsCache()
             } catch {
