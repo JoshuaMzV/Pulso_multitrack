@@ -49,7 +49,7 @@ final class MultitrackAudioEngine: ObservableObject {
     private let waveformQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
-        queue.qualityOfService = .utility
+        queue.qualityOfService = .background
         return queue
     }()
 
@@ -61,6 +61,7 @@ final class MultitrackAudioEngine: ObservableObject {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setPreferredIOBufferDuration(0.01)
             try session.setActive(true)
         } catch {
             print("[PULSO AUDIO] Error configurando AVAudioSession: \(error)")
@@ -304,20 +305,22 @@ final class MultitrackAudioEngine: ObservableObject {
                 audioFiles[id].map { (node, $0) }
             }
             let reference = durationPerStem.max { $0.value < $1.value }.flatMap { playerNodes[$0.key] }
-            let lead = max(0.04, 3 * AVAudioSession.sharedInstance().ioBufferDuration)
+            // Margen amplio tras prepare() para que todos los stems (incl. MP3) reciban play(at:) antes del arranque.
+            let lead = max(0.14, 6 * AVAudioSession.sharedInstance().ioBufferDuration)
             isPlaying = true
             let work = DispatchWorkItem { [weak self] in
                 var scheduled: [AVAudioPlayerNode] = []
                 for (node, _) in tracks { node.stop() }
                 for (node, file) in tracks {
-                    let frame = AVAudioFramePosition(position * file.processingFormat.sampleRate)
+                    let frame = AVAudioFramePosition(round(position * file.processingFormat.sampleRate))
                     guard frame < file.length else { continue }
+                    let remaining = file.length - frame
                     node.scheduleSegment(file, startingFrame: frame,
-                                         frameCount: AVAudioFrameCount(file.length - frame), at: nil)
-                    node.prepare(withFrameCount: AVAudioFrameCount(min(8192, file.length - frame)))
+                                         frameCount: AVAudioFrameCount(remaining), at: nil)
+                    node.prepare(withFrameCount: AVAudioFrameCount(min(32768, remaining)))
                     scheduled.append(node)
                 }
-                // El cursor y todos los stems comparten el mismo instante de arranque.
+                // Calcular anchor DESPUÉS de preparar todos los buffers para arranque sample-accurate simultáneo.
                 let anchor = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: lead)
                 let time = AVAudioTime(hostTime: anchor)
                 for node in scheduled { node.play(at: time) }

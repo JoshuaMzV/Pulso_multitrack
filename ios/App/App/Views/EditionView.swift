@@ -965,10 +965,10 @@ struct LivePlayheadView: View {
     }
 }
 
-/// Un solo muestreo del mezclador para todos los medidores visibles.
+/// Muestreo compartido a 25 FPS para todos los medidores visibles (un solo Timer).
 @MainActor
 private enum MeterUpdates {
-    static let frames = Timer.publish(every: 0.10, on: .main, in: .common)
+    static let frames = Timer.publish(every: 0.04, on: .main, in: .common)
         .autoconnect()
         .map { _ in MultitrackAudioEngine.shared.meterSnapshot() }
         .share()
@@ -979,7 +979,7 @@ struct LiveStemVUMeterView: View {
     let isPlaying: Bool
 
     var body: some View {
-        LiveMeter(stemId: stemId, isPlaying: isPlaying)
+        LiveMeter(stemId: stemId, isPlaying: isPlaying, isStereo: false)
     }
 }
 
@@ -987,35 +987,91 @@ struct LiveMasterVUMeterView: View {
     let isPlaying: Bool
 
     var body: some View {
-        LiveMeter(stemId: nil, isPlaying: isPlaying)
+        LiveMeter(stemId: nil, isPlaying: isPlaying, isStereo: true)
     }
 }
 
+/// Medidor minimalista profesional optimizado para iOS 16 (GPU Canvas + escala dB + peak-hold).
 private struct LiveMeter: View {
     let stemId: String?
     let isPlaying: Bool
-    @State private var band = 0
-    @State private var clipUntil = Date.distantPast
+    let isStereo: Bool
+    @State private var smoothed: Float = 0
+    @State private var peakHold: Float = 0
+    @State private var peakHoldFrames: Int = 0
 
     var body: some View {
-        let colors: [Color] = [.secondary.opacity(0.25), .green.opacity(0.5), .green, .red]
-        let labels = ["Silencio", "Bajo", "Señal", "Saturación"]
-        let index = isPlaying ? band : 0
-        let light = Capsule().fill(colors[index])
-            .frame(width: 6, height: 18)
-            .frame(height: 120, alignment: .center)
-            .accessibilityLabel("Nivel de audio")
-            .accessibilityValue(labels[index])
-        if isPlaying {
-            light.onReceive(MeterUpdates.frames) { peaks in
-                let peak = peaks[stemId] ?? 0
-                if peak >= 1 { clipUntil = Date().addingTimeInterval(0.6) }
-                let next = Date() < clipUntil ? 3 : peak >= 0.1 ? 2 : peak >= 0.001 ? 1 : 0
-                if band != next { band = next }
+        let level = isPlaying ? smoothed : 0
+        let hold = isPlaying ? peakHold : 0
+
+        let meterView = Canvas { context, size in
+            let w = size.width
+            let h = size.height
+            let cols = isStereo ? 2 : 1
+            let colGap: CGFloat = isStereo ? 2.0 : 0.0
+            let barW = (w - colGap) / CGFloat(cols)
+
+            for c in 0..<cols {
+                let x = CGFloat(c) * (barW + colGap)
+                // Fondo minimalista sutil
+                let bgRect = CGRect(x: x, y: 0, width: barW, height: h)
+                context.fill(Path(roundedRect: bgRect, cornerRadius: 1.5), with: .color(Color.white.opacity(0.06)))
+
+                let fillH = max(0, min(h, h * CGFloat(level)))
+                if fillH > 0.5 {
+                    let fillRect = CGRect(x: x, y: h - fillH, width: barW, height: fillH)
+                    let grad = Gradient(stops: [
+                        .init(color: Color(hex: 0x22C55E), location: 0.0),
+                        .init(color: Color(hex: 0x22C55E), location: 0.65),
+                        .init(color: Color(hex: 0xF59E0B), location: 0.85),
+                        .init(color: Color(hex: 0xEF4444), location: 1.0)
+                    ])
+                    context.fill(
+                        Path(roundedRect: fillRect, cornerRadius: 1.5),
+                        with: .linearGradient(grad, startPoint: CGPoint(x: x, y: h), endPoint: CGPoint(x: x, y: 0))
+                    )
+                }
+
+                // Marca nítida de peak-hold
+                if hold > 0.02 {
+                    let holdY = max(1, min(h - 1.5, h * (1.0 - CGFloat(hold))))
+                    let holdColor: Color = hold > 0.88 ? Color(hex: 0xEF4444) : (hold > 0.72 ? Color(hex: 0xF59E0B) : Color(hex: 0x4ADE80))
+                    let holdRect = CGRect(x: x, y: holdY, width: barW, height: 1.5)
+                    context.fill(Path(holdRect), with: .color(holdColor))
+                }
             }
-            .onDisappear { band = 0; clipUntil = .distantPast }
+        }
+        .frame(width: isStereo ? 12 : 6, height: 120)
+        .accessibilityLabel("Nivel de audio")
+
+        if isPlaying {
+            meterView
+                .onReceive(MeterUpdates.frames) { peaks in
+                    let raw = peaks[stemId] ?? 0
+                    // Mapeo logarítmico (-54 dB .. 0 dB) para respuesta musical real
+                    let normalized: Float = raw > 0.002 ? max(0, min(1, (20 * log10(raw) + 54) / 54)) : 0
+                    let nextSmoothed = normalized >= smoothed ? normalized : max(0, smoothed * 0.80)
+                    if abs(nextSmoothed - smoothed) > 0.005 || (nextSmoothed == 0 && smoothed != 0) {
+                        smoothed = nextSmoothed
+                    }
+                    if normalized >= peakHold {
+                        peakHold = normalized
+                        peakHoldFrames = 14
+                    } else if peakHoldFrames > 0 {
+                        peakHoldFrames -= 1
+                    } else if peakHold > 0.005 {
+                        peakHold = max(0, peakHold - 0.04)
+                    } else if peakHold != 0 {
+                        peakHold = 0
+                    }
+                }
+                .onDisappear {
+                    smoothed = 0
+                    peakHold = 0
+                    peakHoldFrames = 0
+                }
         } else {
-            light
+            meterView
         }
     }
 }
