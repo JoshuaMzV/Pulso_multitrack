@@ -128,6 +128,7 @@ final class ShowViewModel: ObservableObject {
 
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     private var beatDuration: Double {
         let unit = Int(currentSong.timeSignature.split(separator: "/").last ?? "4") ?? 4
@@ -143,7 +144,9 @@ final class ShowViewModel: ObservableObject {
 
     func refreshDownloadedSongsCache() {
         var ids = Set<String>()
-        if MultitrackAudioEngine.shared.hasLoadedTracks {
+        // La canción activa cuenta como descargada si el motor ya la cargó o si sus stems están en disco
+        // (la carga del motor es asíncrona: hasLoadedTracks llega tarde y no debe ocultar el estado real).
+        if MultitrackAudioEngine.shared.hasLoadedTracks || currentSong.isDownloadedLocally {
             ids.insert(currentSong.id)
         }
         for s in setlist.songs where s.id != currentSong.id && s.isDownloadedLocally {
@@ -180,6 +183,12 @@ final class ShowViewModel: ObservableObject {
             guard let self = self else { return }
             self.currentSong.durationSeconds = detectedDuration
         }
+        // Refrescar el estado de descarga cuando el motor termina (o falla) la carga asíncrona
+        MultitrackAudioEngine.shared.$hasLoadedTracks
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshDownloadedSongsCache() }
+            .store(in: &cancellables)
         self.loadSong(MockSongData.song1)
         self.checkSessionWithBackend()
         self.loadSetlistsFromBackend()
@@ -244,9 +253,11 @@ final class ShowViewModel: ObservableObject {
             duration: loadedSong.durationSeconds
         )
 
-        // Si la canción no tiene stems descargados localmente, descargarlos automáticamente
+        // Si la canción no tiene stems descargados localmente, descargarlos automáticamente.
+        // Se decide por disco: hasLoadedTracks siempre es false aquí porque la carga del motor es asíncrona,
+        // y usarlo provocaba una "re-descarga" fantasma (0→100%) y una segunda carga del motor.
         refreshDownloadedSongsCache()
-        if checkDownload && !MultitrackAudioEngine.shared.hasLoadedTracks {
+        if checkDownload && !isSongDownloaded(loadedSong) {
             verifyAndDownloadStemsIfNeeded(for: loadedSong)
         }
     }
@@ -590,76 +601,139 @@ final class ShowViewModel: ObservableObject {
         }
     }
 
-    /// Descarga los stems de una canción desde el CDN y la agrega al setlist activo
-    func downloadAndAddSong(_ cloudSong: CloudSong) {
-        guard !isDownloadingSong else { return }
-        let selectionAtStart = currentSong.id
-        isDownloadingSong = true
-        downloadProgress[cloudSong.id] = 0.05
+    // MARK: - Núcleo único de descarga
 
-        Task {
+    /// Stem pendiente de descarga, común al catálogo y al setlist
+    private struct StemDownloadJob {
+        let filename: String
+        let remote: URL
+    }
+
+    /// Cola serializada: una petición nueva espera a la anterior en lugar de descartarse
+    private var downloadChain: Task<Void, Never>?
+    private var queuedDownloadIds: Set<String> = []
+
+    /// Encola una descarga identificada por `key`; ignora duplicados ya en cola.
+    /// `progressKeys` incluye todos los ids con que las vistas consultan el progreso (catálogo y setlist).
+    private func enqueueDownload(key: String, progressKeys: [String], _ work: @escaping @MainActor () async -> Void) {
+        guard !queuedDownloadIds.contains(key) else { return }
+        queuedDownloadIds.insert(key)
+        isDownloadingSong = true
+        for k in progressKeys where downloadProgress[k] == nil { downloadProgress[k] = 0.0 }
+
+        let previous = downloadChain
+        downloadChain = Task { [weak self] in
+            await previous?.value
+            guard let self = self else { return }
+            await work()
+            self.queuedDownloadIds.remove(key)
+            for k in progressKeys { self.downloadProgress[k] = nil }
+            self.isDownloadingSong = !self.queuedDownloadIds.isEmpty
+            self.refreshDownloadedSongsCache()
+        }
+    }
+
+    /// URL remota de un stem: enlace explícito del servidor o ruta estándar de `songs/extracted`
+    private func remoteStemURL(link: String?, folderName: String, filename: String) throws -> URL {
+        guard let base = URL(string: BackendAPIService.shared.baseURL) else { throw APIError.invalidURL }
+        if let link = link, !link.isEmpty {
+            guard let resolved = URL(string: link.replacingOccurrences(of: " ", with: "%20"), relativeTo: base) else {
+                throw APIError.invalidURL
+            }
+            return resolved.absoluteURL
+        }
+        return base.appendingPathComponent("songs/extracted").appendingPathComponent(folderName).appendingPathComponent(filename)
+    }
+
+    /// Descarga los stems que falten en disco. Un fallo individual no aborta la canción;
+    /// solo se marca como completa si todos los stems quedaron en disco. Devuelve cuántos fallaron.
+    @discardableResult
+    private func downloadStemFiles(_ jobs: [StemDownloadJob], into songDir: URL, progressKeys: [String]) async throws -> Int {
+        try FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
+        let rootPath = songDir.standardizedFileURL.path + "/"
+        let total = Double(max(jobs.count, 1))
+        var failures = 0
+
+        for (index, job) in jobs.enumerated() {
+            let local = songDir.appendingPathComponent(job.filename)
+            guard local.standardizedFileURL.path.hasPrefix(rootPath) else { throw APIError.invalidURL }
+            let size = (try? local.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if size <= 1024 {
+                do {
+                    try await BackendAPIService.shared.downloadStem(from: job.remote, to: local)
+                } catch {
+                    failures += 1
+                    print("[PULSO DESCARGA] Falló \(job.filename): \(error)")
+                }
+            }
+            let progress = Double(index + 1) / total
+            for k in progressKeys { downloadProgress[k] = progress }
+        }
+
+        if failures == 0 && !jobs.isEmpty {
+            SongItem.markDownloadComplete(at: songDir)
+        }
+        return failures
+    }
+
+    private static func stemColorHex(for category: String) -> String {
+        switch category {
+        case "click": return "#9297A0"
+        case "guide": return "#F0A028"
+        case "drums": return "#FF4B33"
+        case "bass": return "#3DDC84"
+        case "keys", "piano": return "#4DA6FF"
+        case "pad": return "#B388FF"
+        case "guitars": return "#FFBE55"
+        default: return "#C3C7CC"
+        }
+    }
+
+    private func setlistIndex(matching id: String, title: String) -> Int? {
+        let lower = title.lowercased()
+        return setlist.songs.firstIndex(where: { $0.id == id || $0.title.lowercased() == lower })
+    }
+
+    // MARK: - Descargas públicas
+
+    /// Descarga los stems de una canción del catálogo y la agrega (o actualiza) en el setlist activo
+    func downloadAndAddSong(_ cloudSong: CloudSong) {
+        let selectionAtStart = currentSong.id
+        let matchedId = setlistIndex(matching: cloudSong.id, title: cloudSong.title).map { setlist.songs[$0].id }
+        let progressKeys = Array(Set([cloudSong.id, matchedId].compactMap { $0 }))
+
+        enqueueDownload(key: cloudSong.id, progressKeys: progressKeys) { [weak self] in
+            guard let self = self else { return }
             do {
                 let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let folderName = cloudSong.extractedFolder ?? cloudSong.title.replacingOccurrences(of: " ", with: "_")
                 let songDir = docDir.appendingPathComponent("Songs").appendingPathComponent(folderName)
-                try FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
 
+                // Los stems marcados como inexistentes en el servidor no se piden (evita 404 y descargas "incompletas")
+                let stemsList = (cloudSong.stems ?? []).filter { $0.existsOnServer != false }
+                var jobs: [StemDownloadJob] = []
                 var downloadedStems: [StemItem] = []
-                let stemsList = cloudSong.stems ?? []
-                let total = Double(max(stemsList.count, 1))
-
-                for (index, stem) in stemsList.enumerated() {
+                for stem in stemsList {
                     let stemName = stem.filename ?? stem.original ?? "\(stem.label ?? stem.id).wav"
-                    let localStemURL = songDir.appendingPathComponent(stemName)
-
-                    guard localStemURL.standardizedFileURL.path.hasPrefix(songDir.standardizedFileURL.path + "/") else {
-                        throw APIError.invalidURL
-                    }
-                    let size = (try? localStemURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                    if size <= 1024 {
-                        guard let base = URL(string: BackendAPIService.shared.baseURL) else { throw APIError.invalidURL }
-                        let remote: URL
-                        if let link = stem.url, !link.isEmpty {
-                            guard let resolved = URL(string: link.replacingOccurrences(of: " ", with: "%20"), relativeTo: base) else {
-                                throw APIError.invalidURL
-                            }
-                            remote = resolved.absoluteURL
-                        } else {
-                            remote = base.appendingPathComponent("songs/extracted").appendingPathComponent(folderName).appendingPathComponent(stemName)
-                        }
-                        try await BackendAPIService.shared.downloadStem(from: remote, to: localStemURL)
-                    }
-
-                    let progress = Double(index + 1) / total
-                    self.downloadProgress[cloudSong.id] = progress
-
-                    // Determinar categoría y color
+                    jobs.append(StemDownloadJob(
+                        filename: stemName,
+                        remote: try self.remoteStemURL(link: stem.url, folderName: folderName, filename: stemName)
+                    ))
                     let cat = (stem.category ?? "other").lowercased()
-                    let bus = (cat == "click" || cat == "guide") ? 1 : 0
-                    let colorHex: String
-                    switch cat {
-                    case "click": colorHex = "#9297A0"
-                    case "guide": colorHex = "#F0A028"
-                    case "drums": colorHex = "#FF4B33"
-                    case "bass": colorHex = "#3DDC84"
-                    case "keys", "piano": colorHex = "#4DA6FF"
-                    case "pad": colorHex = "#B388FF"
-                    case "guitars": colorHex = "#FFBE55"
-                    default: colorHex = "#C3C7CC"
-                    }
-
                     downloadedStems.append(StemItem(
                         id: stem.id,
                         label: stem.label ?? stem.id.uppercased(),
                         category: cat,
-                        colorHex: colorHex,
-                        bus: bus,
+                        colorHex: Self.stemColorHex(for: cat),
+                        bus: (cat == "click" || cat == "guide") ? 1 : 0,
                         gainDb: 0.0,
                         filename: stemName,
                         original: stem.original ?? stemName,
                         url: stem.url
                     ))
                 }
+
+                try await self.downloadStemFiles(jobs, into: songDir, progressKeys: progressKeys)
 
                 // Obtener o inferir secciones correspondientes
                 let songSections: [SectionItem]
@@ -676,58 +750,57 @@ final class ShowViewModel: ObservableObject {
                     ]
                 }
 
-                // Crear SongItem nativo
-                let newSong = SongItem(
-                    id: cloudSong.id,
-                    title: cloudSong.title,
-                    artist: cloudSong.artist ?? "Desconocido",
-                    bpm: cloudSong.bpm ?? 120.0,
-                    key: cloudSong.key ?? "C",
-                    timeSignature: cloudSong.timeSignature ?? cloudSong.signature ?? (currentSong.id == cloudSong.id ? currentSong.timeSignature : "4/4"),
-                    durationSeconds: self.currentSong.durationSeconds > 0 ? self.currentSong.durationSeconds : 265.0,
-                    stems: downloadedStems,
-                    sections: songSections,
-                    coverUrl: cloudSong.cover,
-                    folderId: folderName
-                )
-
-                if !self.setlist.songs.contains(where: { $0.id == newSong.id || $0.title.lowercased() == newSong.title.lowercased() }) {
-                    self.setlist.songs.append(newSong)
-                }
-                self.downloadProgress[cloudSong.id] = nil
-                self.downloadProgress[selectionAtStart] = nil
-                self.isDownloadingSong = false
-                if self.currentSong.id == selectionAtStart || self.currentSong.title.lowercased() == newSong.title.lowercased() {
-                    var readySong = newSong
-                    if let index = self.setlist.songs.firstIndex(where: { $0.id == newSong.id || $0.title.lowercased() == newSong.title.lowercased() }) {
-                        let saved = self.setlist.songs[index]
-                        readySong = saved
-                        readySong.folderId = newSong.folderId
-                        readySong.stems = newSong.stems.map { downloaded in
-                            guard var stem = saved.stems.first(where: { $0.id == downloaded.id }) else { return downloaded }
-                            stem.filename = downloaded.filename
-                            stem.original = downloaded.original
-                            return stem
-                        }
-                        self.setlist.songs[index] = readySong
+                let existingIndex = self.setlistIndex(matching: cloudSong.id, title: cloudSong.title)
+                let readySong: SongItem
+                if let index = existingIndex {
+                    // Ya estaba en el setlist: conservar sus datos y mezcla, actualizar carpeta y archivos
+                    var saved = self.setlist.songs[index]
+                    let previousStems = saved.stems
+                    saved.folderId = folderName
+                    saved.stems = downloadedStems.map { downloaded in
+                        guard var stem = previousStems.first(where: { $0.id == downloaded.id }) else { return downloaded }
+                        stem.filename = downloaded.filename
+                        stem.original = downloaded.original
+                        return stem
                     }
+                    self.setlist.songs[index] = saved
+                    readySong = saved
+                } else {
+                    // Duración provisional: el motor la corrige al detectar la real (onSongDurationDetected)
+                    let newSong = SongItem(
+                        id: cloudSong.id,
+                        title: cloudSong.title,
+                        artist: cloudSong.artist ?? "Desconocido",
+                        bpm: cloudSong.bpm ?? 120.0,
+                        key: cloudSong.key ?? "C",
+                        timeSignature: cloudSong.timeSignature ?? cloudSong.signature ?? "4/4",
+                        durationSeconds: 265.0,
+                        stems: downloadedStems,
+                        sections: songSections,
+                        coverUrl: cloudSong.cover,
+                        folderId: folderName
+                    )
+                    self.setlist.songs.append(newSong)
+                    readySong = newSong
+                }
+
+                // Cargar en el motor si es la canción activa o si el usuario no ha cambiado desde que la pidió
+                let isCurrent = self.currentSong.id == readySong.id
+                    || self.currentSong.title.lowercased() == readySong.title.lowercased()
+                if isCurrent || self.currentSong.id == selectionAtStart {
                     self.loadSong(readySong, checkDownload: false)
                 } else {
                     Task.detached(priority: .utility) {
-                        await MultitrackAudioEngine.prewarmSongCache(folderName: newSong.folderName, stems: newSong.stems)
+                        await MultitrackAudioEngine.prewarmSongCache(folderName: readySong.folderName, stems: readySong.stems)
                     }
                 }
-                self.refreshDownloadedSongsCache()
             } catch {
-                print("Error descargando canción: \(error)")
-                self.isDownloadingSong = false
-                self.downloadProgress[cloudSong.id] = nil
-                self.downloadProgress[selectionAtStart] = nil
+                print("[PULSO DESCARGA] Error descargando canción: \(error)")
             }
         }
     }
 
-    /// Verifica si los stems de la canción están en el almacenamiento local; si no, los descarga automáticamente del servidor
+    /// Verifica si los stems de la canción están en el almacenamiento local; si no, los descarga del servidor
     func verifyAndDownloadStemsIfNeeded(for song: SongItem) {
         if song.id == currentSong.id && MultitrackAudioEngine.shared.hasLoadedTracks { return }
 
@@ -736,38 +809,32 @@ final class ShowViewModel: ObservableObject {
                 await self.loadCloudCatalog()
             }
 
-            // Buscar la canción en el catálogo del servidor
             if let cloudSong = self.cloudCatalog.first(where: {
                 $0.id == song.id || $0.title.lowercased() == song.title.lowercased()
             }) {
-                guard self.currentSong.id == song.id else { return }
                 self.downloadAndAddSong(cloudSong)
-            } else {
-                // Descargar stems según la estructura de la canción
+                return
+            }
+
+            // Sin entrada en el catálogo: descargar según la lista de stems de la propia canción
+            self.enqueueDownload(key: song.id, progressKeys: [song.id]) { [weak self] in
+                guard let self = self else { return }
                 let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let folderName = song.folderName
                 let songDir = docDir.appendingPathComponent("Songs").appendingPathComponent(folderName)
-                try? FileManager.default.createDirectory(at: songDir, withIntermediateDirectories: true)
-
-                let total = Double(max(song.stems.count, 1))
-                for (idx, stem) in song.stems.enumerated() {
-                    let stemFilename = stem.filename ?? stem.original ?? "\(stem.label).wav"
-                    let localURL = songDir.appendingPathComponent(stemFilename)
-                    let existingSize = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int64) ?? 0
-                    if existingSize <= 1024 {
-                        let remoteURLStr = "\(BackendAPIService.shared.baseURL)/songs/extracted/\(folderName)/\(stemFilename)"
-                        let safeRemote = remoteURLStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? remoteURLStr
-                        if let remoteURL = URL(string: safeRemote) ?? URL(string: remoteURLStr.replacingOccurrences(of: " ", with: "%20")) {
-                            try? await BackendAPIService.shared.downloadStem(from: remoteURL, to: localURL)
-                        }
-                    }
-                    self.downloadProgress[song.id] = Double(idx + 1) / total
+                let jobs: [StemDownloadJob] = song.stems.compactMap { stem in
+                    let filename = stem.filename ?? stem.original ?? "\(stem.label).wav"
+                    guard let remote = try? self.remoteStemURL(link: stem.url, folderName: folderName, filename: filename) else { return nil }
+                    return StemDownloadJob(filename: filename, remote: remote)
                 }
-                self.downloadProgress[song.id] = nil
-
-                guard self.currentSong.id == song.id else { return }
-                self.loadSong(song, checkDownload: false)
-                self.refreshDownloadedSongsCache()
+                do {
+                    try await self.downloadStemFiles(jobs, into: songDir, progressKeys: [song.id])
+                } catch {
+                    print("[PULSO DESCARGA] Error descargando \(song.title): \(error)")
+                }
+                if self.currentSong.id == song.id {
+                    self.loadSong(self.currentSong, checkDownload: false)
+                }
             }
         }
     }

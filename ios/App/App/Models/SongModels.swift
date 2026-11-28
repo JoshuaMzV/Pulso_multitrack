@@ -228,12 +228,27 @@ struct SongItem: Identifiable, Hashable, Codable {
             return size > 1024
         }
 
+        // Una descarga terminada desde el servidor deja un marcador: cuenta como completa aunque
+        // el setlist liste stems opcionales que el servidor ya no tiene (p. ej. 16 listados, 15 reales).
+        if !audioFiles.isEmpty,
+           FileManager.default.fileExists(atPath: resolvedDir.appendingPathComponent(Self.downloadCompleteMarker).path) {
+            return true
+        }
+
         // Si la canción tiene lista de stems definida, verificar que todos (o la mayoría requerida) existan
         if !stems.isEmpty {
             let requiredCount = stems.count
             return audioFiles.count >= requiredCount
         }
         return audioFiles.count >= 3
+    }
+
+    static let downloadCompleteMarker = ".pulso_complete"
+
+    /// Escribe el marcador de descarga completa en la carpeta de la canción
+    static func markDownloadComplete(at songDir: URL) {
+        let marker = songDir.appendingPathComponent(downloadCompleteMarker)
+        FileManager.default.createFile(atPath: marker.path, contents: Data())
     }
 
     init(id: String, title: String, artist: String, bpm: Double, key: String, timeSignature: String = "4/4", durationSeconds: Double = 270.0, stems: [StemItem] = [], sections: [SectionItem] = [], coverUrl: String? = nil, downloadUrl: String? = nil, folderId: String? = nil, transition: TransitionMode = .stop) {

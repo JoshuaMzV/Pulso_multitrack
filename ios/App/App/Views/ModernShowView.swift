@@ -103,7 +103,7 @@ struct ModernShowView: View {
                             .foregroundColor(PulsoTheme.textDim)
                             .lineLimit(1)
 
-                        if !vm.currentSong.isDownloadedLocally {
+                        if !vm.isSongDownloaded(vm.currentSong) {
                             Button(action: {
                                 vm.verifyAndDownloadStemsIfNeeded(for: vm.currentSong)
                             }) {
