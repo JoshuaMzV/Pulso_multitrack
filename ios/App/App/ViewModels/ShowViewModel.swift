@@ -129,6 +129,27 @@ final class ShowViewModel: ObservableObject {
     // Timer for simulation / playhead if no audio hardware connected yet
     private var timer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var prewarmTask: Task<Void, Never>?
+
+    /// Precarga PCM de las canciones descargadas del setlist (empezando por las siguientes a la activa),
+    /// una a la vez y con prioridad baja. Se cancela al cambiar de canción para no robar CPU a la carga activa.
+    func schedulePrewarm() {
+        prewarmTask?.cancel()
+        let songs = setlist.songs
+        guard let currentIdx = songs.firstIndex(where: { $0.id == currentSong.id }), songs.count > 1 else { return }
+        let ordered = (1..<songs.count).map { songs[(currentIdx + $0) % songs.count] }
+        let targets = ordered
+            .filter { isSongDownloaded($0) }
+            .map { (folder: $0.folderName, stems: $0.stems) }
+        guard !targets.isEmpty else { return }
+
+        prewarmTask = Task.detached(priority: .utility) {
+            for target in targets {
+                if Task.isCancelled { return }
+                await MultitrackAudioEngine.prewarmSongCache(folderName: target.folder, stems: target.stems)
+            }
+        }
+    }
 
     private var beatDuration: Double {
         let unit = Int(currentSong.timeSignature.split(separator: "/").last ?? "4") ?? 4
@@ -187,7 +208,11 @@ final class ShowViewModel: ObservableObject {
         MultitrackAudioEngine.shared.$hasLoadedTracks
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.refreshDownloadedSongsCache() }
+            .sink { [weak self] loaded in
+                self?.refreshDownloadedSongsCache()
+                // Con la canción activa ya sonando, preparar las demás en segundo plano
+                if loaded { self?.schedulePrewarm() }
+            }
             .store(in: &cancellables)
         self.loadSong(MockSongData.song1)
         self.checkSessionWithBackend()
@@ -246,7 +271,8 @@ final class ShowViewModel: ObservableObject {
             nextSong = nil
         }
 
-        // Cargar pistas en el motor nativo multitrack
+        // Cargar pistas en el motor nativo multitrack (la precarga se pausa y se reanuda al terminar)
+        prewarmTask?.cancel()
         MultitrackAudioEngine.shared.loadSongTracks(
             folderName: loadedSong.folderName,
             stems: loadedSong.stems,
@@ -789,10 +815,10 @@ final class ShowViewModel: ObservableObject {
                     || self.currentSong.title.lowercased() == readySong.title.lowercased()
                 if isCurrent || self.currentSong.id == selectionAtStart {
                     self.loadSong(readySong, checkDownload: false)
-                } else {
-                    Task.detached(priority: .utility) {
-                        await MultitrackAudioEngine.prewarmSongCache(folderName: readySong.folderName, stems: readySong.stems)
-                    }
+                } else if MultitrackAudioEngine.shared.hasLoadedTracks {
+                    // Incluir la canción recién descargada en la precarga de fondo
+                    self.refreshDownloadedSongsCache()
+                    self.schedulePrewarm()
                 }
             } catch {
                 print("[PULSO DESCARGA] Error descargando canción: \(error)")

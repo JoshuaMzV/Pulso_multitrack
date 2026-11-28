@@ -460,27 +460,31 @@ struct EditionView: View {
 
                 Canvas { context, size in
                     let totalB = Int(ceil(totBars))
-                    for barIndex in 0..<totalB {
-                        let x = CGFloat(barIndex) * barWidth
-                        let isMajor = (barIndex % 4 == 0) // Compás 1, 5, 9, 13...
+                    // Paso de etiqueta adaptativo: cada número necesita ~30 pt para no encimarse
+                    // (con 170 compases en un iPad, etiquetar cada 4 provocaba números superpuestos).
+                    let minLabelSpacing: CGFloat = 30
+                    let labelStep = [1, 2, 4, 8, 16, 32, 64].first(where: { CGFloat($0) * barWidth >= minLabelSpacing }) ?? 64
+                    // Marcas menores solo si caben; si no, una cada fracción del paso
+                    let tickStep = barWidth >= 4 ? 1 : max(1, labelStep / 4)
 
-                        var linePath = Path()
-                        if isMajor {
-                            linePath.move(to: CGPoint(x: x, y: 0))
-                            linePath.addLine(to: CGPoint(x: x, y: size.height))
-                            context.stroke(linePath, with: .color(PulsoTheme.amber.opacity(0.7)), lineWidth: 1.0)
-
-                            let barNum = barIndex + 1
-                            let text = Text("\(barNum)")
-                                .font(.system(size: 9.5, weight: .heavy, design: .monospaced))
-                                .foregroundColor(PulsoTheme.amber)
-                            context.draw(context.resolve(text), at: CGPoint(x: x + 4, y: size.height / 2.0), anchor: .leading)
+                    var minorPath = Path()
+                    var majorPath = Path()
+                    for barIndex in stride(from: 0, to: totalB, by: tickStep) {
+                        let x = (CGFloat(barIndex) * barWidth).rounded() + 0.5
+                        if barIndex % labelStep == 0 {
+                            majorPath.move(to: CGPoint(x: x, y: size.height * 0.35))
+                            majorPath.addLine(to: CGPoint(x: x, y: size.height))
+                            let text = Text("\(barIndex + 1)")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundColor(PulsoTheme.ink2)
+                            context.draw(context.resolve(text), at: CGPoint(x: x + 3, y: size.height * 0.38), anchor: .leading)
                         } else {
-                            linePath.move(to: CGPoint(x: x, y: size.height - 6))
-                            linePath.addLine(to: CGPoint(x: x, y: size.height))
-                            context.stroke(linePath, with: .color(PulsoTheme.line2), lineWidth: 0.8)
+                            minorPath.move(to: CGPoint(x: x, y: size.height - 4))
+                            minorPath.addLine(to: CGPoint(x: x, y: size.height))
                         }
                     }
+                    context.stroke(minorPath, with: .color(PulsoTheme.line2), lineWidth: 0.5)
+                    context.stroke(majorPath, with: .color(PulsoTheme.amber.opacity(0.55)), lineWidth: 1.0)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { location in
@@ -531,8 +535,8 @@ struct EditionView: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
-            // Horizontal rack of mixer channels with STICKY Master overlay (traspasa y flota encima como en navegador)
-            ZStack(alignment: .trailing) {
+            // Rack horizontal de canales + Master fijo en su propia columna (sin superponerse a los stems)
+            HStack(alignment: .top, spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 8) {
                         ForEach(vm.stems) { stem in
@@ -547,28 +551,32 @@ struct EditionView: View {
                         }
                     }
                     .padding(.leading, 14)
-                    .padding(.trailing, 96) // Espacio para que el último stem no quede tapado por Master
+                    .padding(.trailing, 12)
                     .padding(.bottom, 10)
                 }
-
-                // Canal Master flotante sticky a la derecha
-                HStack(spacing: 0) {
-                    // Sombra degradada para difuminar los stems que pasan por debajo
+                .clipped()
+                // Desvanecido sutil en el borde derecho para indicar que hay más canales al desplazar
+                .overlay(alignment: .trailing) {
                     LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.black.opacity(0.0),
-                            Color.black.opacity(0.6),
-                            PulsoTheme.cardBg
-                        ]),
+                        colors: [PulsoTheme.cardBg.opacity(0), PulsoTheme.cardBg],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
-                    .frame(width: 18)
-
-                    MasterMixerChannelStrip(vm: vm)
-                        .padding(.trailing, 10)
+                    .frame(width: 14)
+                    .allowsHitTesting(false)
                 }
-                .padding(.bottom, 10)
+
+                // Separador vertical entre canales y Master
+                Rectangle()
+                    .fill(PulsoTheme.line2)
+                    .frame(width: 1)
+                    .padding(.vertical, 6)
+                    .padding(.bottom, 10)
+
+                MasterMixerChannelStrip(vm: vm)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 10)
             }
         }
         .background(PulsoTheme.cardBg)
@@ -858,6 +866,36 @@ struct MasterMixerChannelStrip: View {
     }
 }
 
+// MARK: - Indicador de preparación de audio
+
+struct PreparingAudioBadge: View {
+    let progress: Double
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .tint(PulsoTheme.amber)
+                .scaleEffect(0.7)
+            Text("PREPARANDO AUDIO")
+                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                .tracking(0.8)
+                .foregroundColor(PulsoTheme.ink2)
+            ProgressView(value: min(1, max(0, progress)))
+                .tint(PulsoTheme.amber)
+                .frame(width: 70)
+            Text("\(Int(progress * 100))%")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundColor(PulsoTheme.amber)
+                .frame(width: 30, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(PulsoTheme.panel2.opacity(0.95))
+        .overlay(Capsule().stroke(PulsoTheme.line2, lineWidth: 1))
+        .clipShape(Capsule())
+    }
+}
+
 // MARK: - Hardware-Accelerated Isolated Playhead & Track Scroll Container
 
 struct TimelineTracksContainer: View {
@@ -901,7 +939,17 @@ struct TimelineTracksContainer: View {
                     pausedSeconds: pausedSeconds,
                     scrub: scrub
                 )
+
+                // Indicador de preparación: las ondas aparecen por pista mientras avanza
+                if audio.isPreparingAudio {
+                    PreparingAudioBadge(progress: audio.preparingProgress)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.2), value: audio.isPreparingAudio)
             .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Rectangle())
             .onTapGesture { location in

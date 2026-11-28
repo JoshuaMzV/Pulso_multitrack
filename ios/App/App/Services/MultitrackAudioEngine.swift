@@ -3,6 +3,33 @@ import AVFoundation
 import Accelerate
 import os
 
+/// Candado por archivo para la conversión PCM: evita que la precarga y la carga activa
+/// escriban el mismo `.caf.tmp` a la vez. Espera de forma asíncrona (no bloquea hilos del pool).
+actor PCMConversionGate {
+    static let shared = PCMConversionGate()
+    private var busy: Set<String> = []
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func acquire(_ key: String) async {
+        guard busy.contains(key) else {
+            busy.insert(key)
+            return
+        }
+        // La propiedad del candado se transfiere directamente en release()
+        await withCheckedContinuation { waiters[key, default: []].append($0) }
+    }
+
+    func release(_ key: String) {
+        if var queue = waiters[key], !queue.isEmpty {
+            let next = queue.removeFirst()
+            waiters[key] = queue.isEmpty ? nil : queue
+            next.resume()
+        } else {
+            busy.remove(key)
+        }
+    }
+}
+
 /// Motor de audio multitrack sample-locked con pre-decodificación PCM (.caf) y mezcla SIMD (AVAudioSourceNode + vDSP)
 @MainActor
 final class MultitrackAudioEngine: ObservableObject {
@@ -21,6 +48,8 @@ final class MultitrackAudioEngine: ObservableObject {
     @Published var isPlaying: Bool = false
     @Published var hasLoadedTracks: Bool = false
     @Published var isPreparingAudio: Bool = false
+    /// Avance 0…1 de la preparación PCM de la canción en carga
+    @Published var preparingProgress: Double = 0
     @Published var waveformPeaks: [String: [Float]] = [:]
 
     /// Posición en segundos sin @Published para no invalidar SwiftUI en cada fotograma
@@ -62,23 +91,30 @@ final class MultitrackAudioEngine: ObservableObject {
         }
     }
 
-    /// Pre-decodifica en segundo plano los stems descargados a .caf PCM uniforme (tipo shader cache)
+    /// Conversión PCM protegida por el candado del archivo destino
+    nonisolated static func convertGated(sourceURL: URL, cafURL: URL, peaksURL: URL) async -> [Float] {
+        let key = cafURL.standardizedFileURL.path
+        await PCMConversionGate.shared.acquire(key)
+        let peaks = convertToUniformPCMIfNeeded(sourceURL: sourceURL, cafURL: cafURL, peaksURL: peaksURL)
+        await PCMConversionGate.shared.release(key)
+        return peaks
+    }
+
+    /// Pre-decodifica en segundo plano los stems descargados a .caf PCM uniforme (tipo shader cache).
+    /// Va stem por stem para no competir con la UI ni con la carga activa en iPads antiguos,
+    /// y se detiene entre stems si la tarea se cancela.
     nonisolated static func prewarmSongCache(folderName: String, stems: [StemItem]) async {
         guard let songDir = resolveSongDirectory(folderName: folderName) else { return }
-        guard let dirContents = try? FileManager.default.contentsOfDirectory(atPath: songDir.path) else { return }
+        guard var remaining = try? FileManager.default.contentsOfDirectory(atPath: songDir.path) else { return }
         let pcmDir = songDir.appendingPathComponent(".pulso_pcm")
         try? FileManager.default.createDirectory(at: pcmDir, withIntermediateDirectories: true)
 
-        await withTaskGroup(of: Void.self) { group in
-            var remaining = dirContents
-            for stem in stems {
-                guard let url = findStemSourceURL(stem: stem, songDir: songDir, dirContents: &remaining) else { continue }
-                let cafURL = pcmDir.appendingPathComponent("\(stem.id).caf")
-                let peaksURL = pcmDir.appendingPathComponent("\(stem.id).peaks")
-                group.addTask(priority: .utility) {
-                    _ = convertToUniformPCMIfNeeded(sourceURL: url, cafURL: cafURL, peaksURL: peaksURL)
-                }
-            }
+        for stem in stems {
+            if Task.isCancelled { return }
+            guard let url = findStemSourceURL(stem: stem, songDir: songDir, dirContents: &remaining) else { continue }
+            let cafURL = pcmDir.appendingPathComponent("\(stem.id).caf")
+            let peaksURL = pcmDir.appendingPathComponent("\(stem.id).peaks")
+            _ = await convertGated(sourceURL: url, cafURL: cafURL, peaksURL: peaksURL)
         }
     }
 
@@ -129,6 +165,7 @@ final class MultitrackAudioEngine: ObservableObject {
 
         let pcmDir = songDir.appendingPathComponent(".pulso_pcm")
         try? FileManager.default.createDirectory(at: pcmDir, withIntermediateDirectories: true)
+        self.preparingProgress = 0
         self.isPreparingAudio = true
 
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -139,7 +176,7 @@ final class MultitrackAudioEngine: ObservableObject {
                     let cafURL = pcmDir.appendingPathComponent("\(pair.stem.id).caf")
                     let peaksURL = pcmDir.appendingPathComponent("\(pair.stem.id).peaks")
                     group.addTask {
-                        let peaks = Self.convertToUniformPCMIfNeeded(
+                        let peaks = await Self.convertGated(
                             sourceURL: pair.sourceURL,
                             cafURL: cafURL,
                             peaksURL: peaksURL
@@ -148,9 +185,19 @@ final class MultitrackAudioEngine: ObservableObject {
                         return (seqIdx, pair.stem, valid, peaks)
                     }
                 }
+                let totalToPrepare = Double(max(resolvedPairs.count, 1))
+                var completed = 0
                 for await (seqIdx, stem, cafURL, peaks) in group {
                     if let url = cafURL {
                         preparedMap[seqIdx] = (stem, url, peaks)
+                    }
+                    // Publicar onda y avance por stem: la vista se llena progresivamente en vez de quedar vacía
+                    completed += 1
+                    let progress = Double(completed) / totalToPrepare
+                    await MainActor.run { [weak self] in
+                        guard let self = self, self.loadRevision == revision else { return }
+                        if !peaks.isEmpty { self.waveformPeaks[stem.id] = peaks }
+                        self.preparingProgress = progress
                     }
                 }
             }
